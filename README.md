@@ -36,6 +36,22 @@ npm run verify:engine
 - S2(資本主義×ロボ)の収入ジニ ≈ 0.58
 - S3(応援×ロボ)の就労16人・初期幸福 ≈ 40
 
+## シミュレーション記録の保存(Supabase)
+
+「💾 保存」でシミュレーション全状態(住民・年代記・指標・施行ルール等)をSupabaseに記録し、
+「📂 記録」から読み込んで続きを再開できる。一度保存すると、時間を進めるたびに同じ記録へ
+自動上書き保存される(3秒デバウンス)。
+
+セットアップ:
+
+1. [Supabase](https://supabase.com) でプロジェクトを作成
+2. SQL Editor で `supabase/schema.sql` を実行(`sim_runs` テーブル作成)
+3. Vercel の環境変数に `SUPABASE_URL` と `SUPABASE_SERVICE_ROLE_KEY` を設定
+   (Settings → API の Project URL / service_role キー)
+
+キーはサーバーレス関数 `api/state.js` だけが使用し、ブラウザには露出しない。
+未設定でもアプリは動作する(保存ボタンでエラーメッセージが出るだけ)。
+
 ## ビルド / デプロイ
 
 ```bash

@@ -10,6 +10,7 @@ import {
 import { fbHour, fbDay, fbMonth, fbYear, fbNoted, markFbNoted, resetFbNoted } from "./engine/fallback.js";
 import { SCENARIOS, HOUR_SYSTEM, DAY_SYSTEM, MONTH_SYSTEM, YEAR_SYSTEM, rosterText } from "./engine/prompts.js";
 import { callClaude, parseJSON } from "./api.js";
+import { saveRun, listRuns, loadRun, deleteRun } from "./store.js";
 
 /* ============================================================
    NEO 2050 SOCIETY SIMULATOR v3.3 — 余白理論エンジン(Web版)
@@ -78,10 +79,16 @@ export default function NeoSimulator() {
   const [error, setError] = useState(null);
   const [report, setReport] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
+  const [runId, setRunId] = useState(null);      // Supabase上の記録ID(保存後は同じ記録に上書き)
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveMsg, setSaveMsg] = useState(null);
+  const [loadOpen, setLoadOpen] = useState(false);
+  const [runs, setRuns] = useState(null);        // null=読込中 / []=なし
+  const [runsError, setRunsError] = useState(null);
   const zoneHoursRef = useRef({ house: 0, culture: 0, sports: 0, robots: 0, food: 0, home: 0 });
   const issuedRef = useRef(0); // BI累計支給額(循環率の分母)
   const stateRef = useRef({});
-  stateRef.current = { agents, now, challenges, events, ticking, playing, institutions, metrics, scenario, customRules };
+  stateRef.current = { agents, now, challenges, events, ticking, playing, institutions, metrics, scenario, customRules, eraName, worldNote };
 
   const pushEvents = (list, arr) => [...list, ...arr].slice(-120);
   const noise = amp => Math.round((Math.random() * 2 - 1) * amp);
@@ -505,6 +512,86 @@ export default function NeoSimulator() {
     setInterviewLoading(false);
   };
 
+  // ===== シミュレーション記録(Supabase) =====
+  const snapshot = () => {
+    const S = stateRef.current;
+    return {
+      version: 1,
+      scenario: S.scenario,
+      now: S.now.getTime(),
+      agents: S.agents,
+      events: S.events,
+      challenges: S.challenges,
+      institutions: S.institutions,
+      customRules: S.customRules,
+      metrics: S.metrics,
+      eraName: S.eraName,
+      worldNote: S.worldNote,
+      zoneHours: { ...zoneHoursRef.current },
+      issued: issuedRef.current,
+    };
+  };
+  const runTitle = () => `${SCENARIOS[stateRef.current.scenario].short} ${fmtDate(stateRef.current.now)}`;
+
+  const doSave = async () => {
+    if (saveBusy) return;
+    setSaveBusy(true); setSaveMsg(null);
+    try {
+      const r = await saveRun(snapshot(), { title: runTitle(), scenario: stateRef.current.scenario }, runId);
+      setRunId(r.id);
+      setSaveMsg("💾 保存しました(以降は自動で上書き保存)");
+    } catch (e) {
+      setSaveMsg(`保存失敗: ${(e && e.message) || e}`.slice(0, 90));
+    }
+    setSaveBusy(false);
+    setTimeout(() => setSaveMsg(null), 5000);
+  };
+
+  // 一度保存した記録は、時間が進むたびに自動で上書き保存(3秒デバウンス・失敗は静かに無視)
+  useEffect(() => {
+    if (!runId || !metrics.length) return;
+    const t = setTimeout(() => {
+      saveRun(snapshot(), { title: runTitle(), scenario: stateRef.current.scenario }, runId)
+        .catch(e => console.warn("自動保存失敗", e));
+    }, 3000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [metrics, runId]);
+
+  const openLoad = () => {
+    setLoadOpen(true); setRuns(null); setRunsError(null);
+    listRuns().then(r => setRuns(r.runs)).catch(e => { setRuns([]); setRunsError(String((e && e.message) || e)); });
+  };
+
+  const restore = (s, id) => {
+    setPlaying(false);
+    setScenario(s.scenario); setAgents(s.agents); setNow(new Date(s.now));
+    setEvents(s.events || []); setChallenges(s.challenges || []); setInstitutions(s.institutions || []);
+    setCustomRules(s.customRules || []); setMetrics(s.metrics || []);
+    setEraName(s.eraName || null); setWorldNote(s.worldNote || "");
+    zoneHoursRef.current = s.zoneHours || { house: 0, culture: 0, sports: 0, robots: 0, food: 0, home: 0 };
+    issuedRef.current = s.issued || 0;
+    setSelected(null); setInterview([]); setReport(null); setError(null);
+    setRunId(id); setLoadOpen(false);
+    setSaveMsg("📂 記録を読み込みました");
+    setTimeout(() => setSaveMsg(null), 4000);
+  };
+
+  const doLoad = async (id) => {
+    try {
+      const r = await loadRun(id);
+      restore(r.state, r.id);
+    } catch (e) { setRunsError(String((e && e.message) || e)); }
+  };
+
+  const doDelete = async (id) => {
+    try {
+      await deleteRun(id);
+      setRuns(rs => (rs || []).filter(x => x.id !== id));
+      if (id === runId) setRunId(null);
+    } catch (e) { setRunsError(String((e && e.message) || e)); }
+  };
+
   const reset = (scn = stateRef.current.scenario) => {
     setPlaying(false); setScenario(scn); setAgents(generatePopulation(scn)); setNow(new Date(START));
     setEvents([]); setChallenges([]); setInstitutions([]); setMetrics([]); setCustomRules([]);
@@ -512,6 +599,7 @@ export default function NeoSimulator() {
     zoneHoursRef.current = { house: 0, culture: 0, sports: 0, robots: 0, food: 0, home: 0 };
     issuedRef.current = 0;
     resetFbNoted();
+    setRunId(null); // リセット後は別の記録として保存する
     setWorldNote("2050年1月1日、シミュレーション待機中"); setError(null);
   };
 
@@ -587,6 +675,14 @@ export default function NeoSimulator() {
           {jumpBtn("1ヶ月", tickMonth, "bg-violet-800 hover:bg-violet-700")}
           {jumpBtn("1年", tickYear, "bg-amber-700 hover:bg-amber-600")}
           <button onClick={() => reset()} className="rounded-xl p-2 bg-slate-800 hover:bg-slate-700 border border-white/5 shrink-0" title="リセット"><RotateCcw size={13}/></button>
+          <div className="w-px h-5 bg-white/10 shrink-0" />
+          <button onClick={doSave} disabled={saveBusy}
+            className="rounded-xl px-3 py-2 text-xs font-bold bg-slate-800 hover:bg-slate-700 border border-white/5 disabled:opacity-40 shrink-0 whitespace-nowrap"
+            title="現在の状態をクラウドに保存">{saveBusy ? "💾 保存中…" : runId ? "💾 上書き保存" : "💾 保存"}</button>
+          <button onClick={openLoad}
+            className="rounded-xl px-3 py-2 text-xs font-bold bg-slate-800 hover:bg-slate-700 border border-white/5 shrink-0 whitespace-nowrap"
+            title="保存した記録の一覧">📂 記録</button>
+          {saveMsg && <span className="text-[10px] text-slate-300 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 shrink-0 whitespace-nowrap">{saveMsg}</span>}
         </div>
       </div>
 
@@ -944,6 +1040,38 @@ export default function NeoSimulator() {
                 placeholder={`${sel.name}に質問…`}
                 className="flex-1 bg-slate-800 rounded-lg px-2.5 py-2 text-[11px] outline-none focus:ring-1 ring-cyan-500 min-w-0" />
               <button onClick={askAgent} disabled={interviewLoading} className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-lg px-2.5 text-[11px] font-bold shrink-0">送信</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== 保存記録の一覧モーダル ===== */}
+      {loadOpen && (
+        <div className="absolute inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setLoadOpen(false)}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-md max-h-[75vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+              <div className="text-sm font-bold">📂 保存した記録</div>
+              <button className="text-slate-400 hover:text-white p-1.5 -m-1 rounded-lg" onClick={() => setLoadOpen(false)}><X size={16}/></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+              {runsError && <div className="text-[11px] text-rose-300 bg-rose-950/50 border border-rose-800/50 rounded-lg p-2.5 leading-relaxed">{runsError}</div>}
+              {runs === null && !runsError && <div className="text-xs text-slate-500 text-center py-8 animate-pulse">読み込み中…</div>}
+              {runs !== null && runs.length === 0 && !runsError && (
+                <div className="text-xs text-slate-500 text-center py-8 leading-relaxed">保存された記録はまだありません。<br/>ヘッダーの「💾 保存」で現在の状態を記録できます。</div>
+              )}
+              {(runs || []).map(r => (
+                <div key={r.id} className={`flex items-center gap-2.5 bg-slate-800/70 border rounded-xl px-3 py-2.5 ${r.id === runId ? "border-cyan-500/50" : "border-white/5"}`}>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold truncate">{r.title || "(無題)"} {r.id === runId && <span className="text-[9px] text-cyan-300 font-normal">← 現在の記録</span>}</div>
+                    <div className="text-[9px] text-slate-500 font-mono">{SCENARIOS[r.scenario]?.short || r.scenario} ・ 更新 {new Date(r.updated_at).toLocaleString("ja-JP")}</div>
+                  </div>
+                  <button onClick={() => doLoad(r.id)} className="bg-cyan-700 hover:bg-cyan-600 rounded-lg px-3 py-1.5 text-[11px] font-bold shrink-0">読込</button>
+                  <button onClick={() => doDelete(r.id)} className="text-slate-500 hover:text-rose-400 p-1.5 shrink-0" title="削除"><X size={13}/></button>
+                </div>
+              ))}
+            </div>
+            <div className="px-4 py-2.5 border-t border-white/5 text-[9px] text-slate-500 leading-relaxed">
+              記録はSupabaseに保存されます(サーバー側の SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY が必要)。一度保存すると、時間を進めるたびに同じ記録へ自動上書きされます。
             </div>
           </div>
         </div>
