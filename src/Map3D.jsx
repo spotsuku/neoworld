@@ -152,29 +152,116 @@ export default function Map3D({ agents, selected, isNight, onSelect }) {
       ring.position.set(cx, 0.55, cz);
       scene.add(ring);
 
+      /* コンセプトアート「NEOがつくる、応援資本主義の未来」準拠のゾーン造形 */
       if (key === "house") {
-        // NEO HOUSE: ガラス張りの段々タワー
-        const glass = new THREE.MeshPhongMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0.4, shininess: 90 });
-        [[8.5, 4.5, 2.25], [6.4, 3.6, 6.3], [4.4, 3.0, 9.6]].forEach(([rr, h, y]) => {
-          const m = new THREE.Mesh(new THREE.CylinderGeometry(rr, rr, h, 40), glass);
-          m.position.set(cx, y, cz);
-          scene.add(m);
+        // NEO HOUSE: 緑のテラスが巡る段々のガラスタワー(人との交流と探究の拠点)
+        const glass = new THREE.MeshPhongMaterial({ color: 0xbfe4ff, transparent: true, opacity: 0.55, shininess: 120 });
+        const warm = new THREE.MeshLambertMaterial({ color: 0xffe9b8, emissive: 0xffc46b, emissiveIntensity: 0.4 });
+        const terrace = new THREE.MeshLambertMaterial({ color: 0x5cb571 });
+        [[9.2, 3.6, 2.3], [7.2, 3.2, 5.6], [5.2, 2.8, 8.5], [3.4, 2.4, 11.0]].forEach(([rr, h, y]) => {
+          const core = new THREE.Mesh(new THREE.CylinderGeometry(rr * 0.42, rr * 0.42, h, 32), warm);
+          core.position.set(cx, y, cz);
+          const shell = new THREE.Mesh(new THREE.CylinderGeometry(rr, rr, h, 40), glass);
+          shell.position.set(cx, y, cz);
+          // テラスの緑は縁のリングだけ(ガラスの層が見えるように)
+          const ledge = new THREE.Mesh(new THREE.TorusGeometry(rr + 0.25, 0.32, 10, 48), terrace);
+          ledge.rotation.x = Math.PI / 2;
+          ledge.position.set(cx, y + h / 2 + 0.12, cz);
+          scene.add(core, shell, ledge);
         });
-      } else {
-        // 各ゾーンのパビリオン(色付きの小さな建物)
-        const pav = new THREE.Mesh(
-          new THREE.BoxGeometry(4.6, 3.4, 4.6),
-          new THREE.MeshLambertMaterial({ color: col })
+        const plaza = new THREE.Mesh(new THREE.RingGeometry(r + 1.2, r + 3.2, 48),
+          new THREE.MeshLambertMaterial({ color: 0xf5f0e0, transparent: true, opacity: 0.6 }));
+        plaza.rotation.x = -Math.PI / 2;
+        plaza.position.set(cx, 0.03, cz);
+        scene.add(plaza);
+      } else if (key === "sports") {
+        // スポーツ: 陸上トラック+フィールド+観客スタンド+大型ビジョン
+        const field = new THREE.Mesh(new THREE.CircleGeometry(r * 0.5, 40), new THREE.MeshLambertMaterial({ color: 0x74c94e }));
+        field.rotation.x = -Math.PI / 2;
+        field.position.set(cx, 0.53, cz);
+        const track = new THREE.Mesh(new THREE.RingGeometry(r * 0.5, r * 0.82, 48), new THREE.MeshLambertMaterial({ color: 0x2f6fd8 }));
+        track.rotation.x = -Math.PI / 2;
+        track.position.set(cx, 0.53, cz);
+        const stand = new THREE.Mesh(new THREE.TorusGeometry(r * 0.92, 1.1, 8, 28, Math.PI * 0.75), new THREE.MeshLambertMaterial({ color: 0xf1f5f9 }));
+        stand.rotation.x = Math.PI / 2;
+        stand.rotation.z = Math.PI * 1.05;
+        stand.position.set(cx, 1.2, cz);
+        const screen = new THREE.Mesh(new THREE.BoxGeometry(5.4, 3, 0.4),
+          new THREE.MeshLambertMaterial({ color: 0x0f172a, emissive: 0x3b82f6, emissiveIntensity: 0.5 }));
+        screen.position.set(cx, 3.4, cz - r * 0.72);
+        scene.add(field, track, stand, screen);
+      } else if (key === "culture") {
+        // 文化: 野外ステージ(シェル)+カラフルなアートウォール
+        const stage = new THREE.Mesh(new THREE.CylinderGeometry(3.6, 3.9, 1.1, 32), new THREE.MeshLambertMaterial({ color: 0xf8fafc }));
+        stage.position.set(cx, 1.05, cz - r * 0.28);
+        const shell = new THREE.Mesh(
+          new THREE.CylinderGeometry(4.3, 4.3, 4.6, 28, 1, true, Math.PI * 0.9, Math.PI * 1.2),
+          new THREE.MeshLambertMaterial({ color: col, side: THREE.DoubleSide })
         );
-        pav.position.set(cx, 2.2, cz - r * 0.45);
-        scene.add(pav);
-        const roof = new THREE.Mesh(
-          new THREE.ConeGeometry(3.7, 2.2, 4),
-          new THREE.MeshLambertMaterial({ color: col.clone().multiplyScalar(0.75) })
-        );
-        roof.rotation.y = Math.PI / 4;
-        roof.position.set(cx, 5.0, cz - r * 0.45);
-        scene.add(roof);
+        shell.position.set(cx, 2.9, cz - r * 0.28);
+        scene.add(stage, shell);
+        [[0xf472b6, -1], [0x22d3ee, 1]].forEach(([c, s]) => {
+          const wall = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.6, 0.35),
+            new THREE.MeshLambertMaterial({ color: c, emissive: c, emissiveIntensity: 0.25 }));
+          wall.position.set(cx + s * r * 0.55, 1.85, cz + r * 0.38);
+          wall.rotation.y = s * 0.5;
+          scene.add(wall);
+        });
+      } else if (key === "robots") {
+        // 農場: 植栽レーン+温室+農場ロボット(労働はAI・ロボットが担う)
+        for (let i = 0; i < 4; i++) {
+          const x = cx - 4.5 + i * 3;
+          const bed = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.5, r * 1.05), new THREE.MeshLambertMaterial({ color: 0x8a6a4a }));
+          bed.position.set(x, 0.75, cz + r * 0.18);
+          const crop = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.5, r), new THREE.MeshLambertMaterial({ color: 0x55b868 }));
+          crop.position.set(x, 1.25, cz + r * 0.18);
+          scene.add(bed, crop);
+        }
+        const greenhouse = new THREE.Mesh(new THREE.BoxGeometry(6.8, 3.4, 4.4),
+          new THREE.MeshPhongMaterial({ color: 0xd8f4ff, transparent: true, opacity: 0.4, shininess: 80 }));
+        greenhouse.position.set(cx + 2.2, 2.2, cz - r * 0.5);
+        const botBody = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1.0, 1.8, 16), new THREE.MeshLambertMaterial({ color: 0xf1f5f9 }));
+        botBody.position.set(cx - 6.8, 1.45, cz - r * 0.42);
+        const botHead = new THREE.Mesh(new THREE.SphereGeometry(0.75, 16, 12), new THREE.MeshLambertMaterial({ color: 0xe2e8f0 }));
+        botHead.position.set(cx - 6.8, 2.8, cz - r * 0.42);
+        const visor = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.32, 0.2),
+          new THREE.MeshLambertMaterial({ color: 0x0f172a, emissive: 0x38bdf8, emissiveIntensity: 0.8 }));
+        visor.position.set(cx - 6.8, 2.85, cz - r * 0.42 + 0.62);
+        scene.add(greenhouse, botBody, botHead, visor);
+      } else if (key === "food") {
+        // 食: パラソル付きテラス席+Farm to Tableのキッチンカウンター
+        [[-0.45, 0.25], [0.12, -0.35], [0.5, 0.28]].forEach(([dx, dz]) => {
+          const x = cx + dx * r, z2 = cz + dz * r;
+          const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.7, 8), new THREE.MeshLambertMaterial({ color: 0x94a3b8 }));
+          leg.position.set(x, 1.55, z2);
+          const table = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.15, 0.18, 20), new THREE.MeshLambertMaterial({ color: 0xffffff }));
+          table.position.set(x, 1.2, z2);
+          const parasol = new THREE.Mesh(new THREE.ConeGeometry(2.0, 1.1, 12), new THREE.MeshLambertMaterial({ color: 0xf59e42 }));
+          parasol.position.set(x, 3.3, z2);
+          scene.add(leg, table, parasol);
+        });
+        const counter = new THREE.Mesh(new THREE.BoxGeometry(5.6, 2.2, 2.3), new THREE.MeshLambertMaterial({ color: 0xb4795a }));
+        counter.position.set(cx, 1.6, cz - r * 0.55);
+        const awning = new THREE.Mesh(new THREE.BoxGeometry(6.0, 0.3, 3.1), new THREE.MeshLambertMaterial({ color: 0xf59e42 }));
+        awning.position.set(cx, 3.0, cz - r * 0.55);
+        scene.add(counter, awning);
+      } else if (key === "home") {
+        // 住居: パステルカラーの住宅クラスタ
+        const pastel = [0xf3e8d8, 0xe8eef5, 0xf5e8ee, 0xe9f5e8, 0xf5f2e0];
+        const rngH = mulberry32(20500103);
+        for (let i = 0; i < 6; i++) {
+          const ang2 = (i / 6) * Math.PI * 2 + 0.4;
+          const dist = r * (0.42 + rngH() * 0.26);
+          const x = cx + Math.cos(ang2) * dist, z2 = cz + Math.sin(ang2) * dist;
+          const s = 1.7 + rngH() * 0.7;
+          const hBody = new THREE.Mesh(new THREE.BoxGeometry(s * 1.5, s, s * 1.4), new THREE.MeshLambertMaterial({ color: pastel[i % 5] }));
+          hBody.rotation.y = rngH() * Math.PI;
+          hBody.position.set(x, 0.5 + s / 2, z2);
+          const hRoof = new THREE.Mesh(new THREE.ConeGeometry(s * 1.18, s * 0.85, 4), new THREE.MeshLambertMaterial({ color: 0xcf7a5a }));
+          hRoof.rotation.y = hBody.rotation.y + Math.PI / 4;
+          hRoof.position.set(x, 0.5 + s + s * 0.42, z2);
+          scene.add(hBody, hRoof);
+        }
       }
 
       const label = makeSprite(`${z.icon} ${z.name}`, { bg: "rgba(255,255,255,.92)", color: "#0f172a", fontSize: 40, scale: 0.042 });
@@ -209,6 +296,34 @@ export default function Map3D({ agents, selected, isNight, onSelect }) {
       b.position.set(Math.cos(ang) * dist, h / 2, Math.sin(ang) * dist);
       scene.add(b);
       buildings.push(b);
+    }
+
+    // 空を飛び交うドローン(コンセプトアートの空)
+    const drones = [];
+    const droneMat = new THREE.MeshLambertMaterial({ color: 0x475569 });
+    const rotorMat = new THREE.MeshLambertMaterial({ color: 0x94a3b8 });
+    for (let i = 0; i < 4; i++) {
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.35, 1.1), droneMat));
+      [[-0.7, -0.7], [0.7, -0.7], [-0.7, 0.7], [0.7, 0.7]].forEach(([dx, dz]) => {
+        const rotor = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.08, 10), rotorMat);
+        rotor.position.set(dx, 0.25, dz);
+        g.add(rotor);
+      });
+      scene.add(g);
+      drones.push({ g, r: 26 + i * 14, h: 17 + i * 4, speed: 0.12 + i * 0.035, phase: i * 1.7 });
+    }
+
+    // 花畑(地面の彩り)
+    const flowerCols = [0xffd7e8, 0xfff3b8, 0xffffff, 0xd8ecff];
+    for (let i = 0; i < 26; i++) {
+      const x = (rng() - 0.5) * 170, zp = (rng() - 0.5) * 170;
+      if (zonesArr.some(z => Math.hypot(x - W(z.x), zp - W(z.y)) < z.r * 1.35 + 3)) continue;
+      const patch = new THREE.Mesh(new THREE.CircleGeometry(1.1 + rng() * 1.6, 10),
+        new THREE.MeshLambertMaterial({ color: flowerCols[Math.floor(rng() * 4)], transparent: true, opacity: 0.7 }));
+      patch.rotation.x = -Math.PI / 2;
+      patch.position.set(x, 0.02, zp);
+      scene.add(patch);
     }
 
     // 住民
@@ -273,6 +388,13 @@ export default function Map3D({ agents, selected, isNight, onSelect }) {
       buildingMat.color.copy(curEnv.building);
       hemi.intensity = curEnv.hemi;
       sun.intensity = curEnv.sun;
+
+      const t0 = performance.now() / 1000;
+      drones.forEach(d => {
+        const a = t0 * d.speed + d.phase;
+        d.g.position.set(Math.cos(a) * d.r, d.h + Math.sin(t0 * 1.7 + d.phase) * 0.8, Math.sin(a) * d.r);
+        d.g.rotation.y = -a;
+      });
 
       for (const rec of agentMeshes.values()) {
         rec.body.position.lerp(rec.target, 0.06);
