@@ -343,9 +343,19 @@ export default function NeoSimulator() {
     r.stam = clamp(r.stam + (75 - r.stam) * Math.min(1, days / 20) + noise(5));
     r.conn = clamp(r.conn + (own || completedOwn ? 6 : -4) * Math.min(3, days / 10) + noise(5));
     r.chal = own > 0 ? clamp(60 + noise(10)) : completedOwn ? clamp(75 + noise(8)) : clamp(r.chal + (36 - r.chal) * 0.5 + noise(6));
-    r.ment = clamp(r.ment + dMental + (r.conn < 30 ? -4 : 0) + noise(6));
+    // 快楽適応(セットポイント理論): メンタルはショック後、加齢U字カーブの
+    // 個人基準値(中年が谷・高齢で回復)へゆっくり回帰する — 体力の自然回復と同型
+    const setPoint = clamp(66 - 11 * Math.exp(-((a.age - 50) ** 2) / 350), 40, 70);
+    r.ment = clamp(r.ment + dMental + (r.conn < 30 ? -4 : 0) + (setPoint - r.ment) * Math.min(0.5, days / 180) + noise(6));
     return r;
   }
+
+  // ソーシャルサポートの緩衝効果: 応援を受け取ると心とつながりが潤う
+  // (+1時間のapplySupportGlowと同じ性質をジャンプ刻みにも)
+  const applyJumpGlow = (res, received) => {
+    if (received > 0) { res.conn = clamp(res.conn + 4); res.ment = clamp(res.ment + 3); }
+    return res;
+  };
 
   // ===== 1日 =====
   const tickDay = useCallback(async () => {
@@ -374,7 +384,7 @@ export default function NeoSimulator() {
       issuedRef.current += inc;
       const arc = (result.highlights || []).find(x => x.agentId === a.id && x.text);
       return finalize({ ...a, speech: null, support: a.support + inc + (fundGains[a.id] || 0), recv: (a.recv || 0) + (dist[a.id] || 0) + (fundGains[a.id] || 0),
-        res: stepResourcesJump(a, 1, result.dMental || 0, newCh),
+        res: applyJumpGlow(stepResourcesJump(a, 1, result.dMental || 0, newCh), (dist[a.id] || 0) + (fundGains[a.id] || 0)),
         memories: arc ? [...a.memories.slice(-9), `${t}:${arc.text}`] : a.memories });
     });
     setAgents(updated); setChallenges(newCh);
@@ -420,7 +430,7 @@ export default function NeoSimulator() {
       issuedRef.current += inc;
       const arc = (result.arcs || []).find(x => x.agentId === a.id && x.text);
       return finalize({ ...a, speech: null, support: a.support + inc + (fundGains[a.id] || 0), recv: (a.recv || 0) + (dist[a.id] || 0) + (fundGains[a.id] || 0),
-        res: stepResourcesJump(a, 30, result.dMental || 0, newCh),
+        res: applyJumpGlow(stepResourcesJump(a, 30, result.dMental || 0, newCh), (dist[a.id] || 0) + (fundGains[a.id] || 0)),
         memories: [...a.memories.slice(-8), `${t}:${arc ? arc.text : "月日が流れた"}`] });
     });
     setAgents(updated); setChallenges(newCh); setInstitutions(newInst);
@@ -516,7 +526,7 @@ export default function NeoSimulator() {
         : (base.dailyIncome || 0) * 365;
       issuedRef.current += inc;
       const arc = (result.arcs || []).find(x => x.agentId === a.id && x.text);
-      const res = stepResourcesJump(base, 365, result.dMental || 0, newCh);
+      const res = applyJumpGlow(stepResourcesJump(base, 365, result.dMental || 0, newCh), (dist[a.id] || 0) + (fundGains[a.id] || 0));
       if (S.scenario === "transition") {
         // 定着した文化(対話の場・互助)が「つながり」の底を支える — 24年運転での孤立崩壊を防ぐ
         const connFloor = 22 + Math.min(10, newInst.length) * 3;
