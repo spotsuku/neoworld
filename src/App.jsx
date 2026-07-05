@@ -1,5 +1,8 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, Suspense, lazy } from "react";
 import { Play, Pause, MessageCircle, Heart, Flag, Activity, X, RotateCcw, Landmark } from "lucide-react";
+
+// 3Dビュー(three.js)は遅延ロードして初期バンドルを軽く保つ
+const Map3D = lazy(() => import("./Map3D.jsx"));
 import {
   ZONES, ZONE_KEYS, RES_DEF, NEED_LINE, CAP_FLOOR, FUND_MONTHLY, OPT_SLACK,
   clamp, normCap, derive, slackState, gini, generatePopulation, weakest,
@@ -52,6 +55,7 @@ function MiniLine({ data, dataKey, color, domain }) {
 // ============================================================
 export default function NeoSimulator() {
   const isMobile = useIsMobile();
+  const [view, setView] = useState("3d"); // "3d"=立体空間 / "2d"=平面分析
   const [scenario, setScenario] = useState("post");
   const [agents, setAgents] = useState(() => generatePopulation("post"));
   const [now, setNow] = useState(new Date(START));
@@ -532,103 +536,160 @@ export default function NeoSimulator() {
     const ring = Math.floor((k - 1) / 8), idx = (k - 1) % 8;
     const rad = 4.5 + ring * 3.2;
     const ang = idx / 8 * Math.PI * 2 + ring * 0.4;
-    return { ...a, px: z.x + Math.cos(ang) * rad, py: z.y + Math.sin(ang) * rad * 0.8 + 2 };
+    return {
+      ...a,
+      px: Math.max(3, Math.min(97, z.x + Math.cos(ang) * rad)),
+      py: Math.max(4, Math.min(96, z.y + Math.sin(ang) * rad * 0.8 + 2)),
+    };
   });
 
   const jumpBtn = (label, fn, cls) => (
     <button onClick={() => run(fn, label)} disabled={ticking || playing}
-      className={`rounded-lg px-3 py-2 text-xs font-bold transition disabled:opacity-40 shrink-0 whitespace-nowrap ${cls}`}>+{label}</button>
+      className={`rounded-xl px-3.5 py-2 text-xs font-bold transition disabled:opacity-40 shrink-0 whitespace-nowrap border border-white/5 shadow-sm ${cls}`}>+{label}</button>
   );
   const resValue = (a, key) => key === "cap" ? normCap(a.support) : a.res[key];
 
   return (
     <div className="w-full h-screen flex flex-col bg-slate-950 text-white font-sans overflow-hidden">
       {/* ===== ヘッダー ===== */}
-      <div className="bg-slate-900 border-b border-slate-800 px-3 py-2 space-y-1.5 shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="font-black tracking-widest text-sm shrink-0">NE<span className="text-yellow-300">O</span> <span className="text-[9px] font-bold text-slate-400 tracking-normal">v3.3 余白理論</span></div>
-          {eraName && <div className="text-[9px] bg-indigo-900/70 border border-indigo-700 rounded-full px-2 py-0.5 text-indigo-200 truncate">{eraName}</div>}
-          <div className="ml-auto text-[10px] md:text-xs font-mono bg-slate-800 rounded-lg px-2 py-1 shrink-0 whitespace-nowrap">{fmtDate(now)} {isNight ? "🌙" : "☀️"}</div>
+      <div className="bg-slate-950/95 border-b border-white/5 px-3.5 py-2.5 space-y-2 shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="shrink-0 flex items-baseline gap-2">
+            <span className="font-black tracking-[0.28em] text-base bg-gradient-to-r from-white via-cyan-100 to-cyan-300 bg-clip-text text-transparent">NEO</span>
+            <span className="text-[9px] font-bold text-slate-500 tracking-widest">2050・余白理論 v3.3</span>
+          </div>
+          {eraName && <div className="text-[10px] bg-indigo-500/15 border border-indigo-400/30 rounded-full px-3 py-1 text-indigo-200 truncate">{eraName}</div>}
+          <div className="ml-auto text-[10px] md:text-xs font-mono bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 shrink-0 whitespace-nowrap text-slate-200">{fmtDate(now)} {isNight ? "🌙" : "☀️"}</div>
         </div>
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5" style={{ WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}>
-          <div className="flex rounded-lg overflow-hidden border border-slate-700 shrink-0">
+        <div className="flex items-center gap-2 overflow-x-auto pb-0.5" style={{ WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}>
+          <div className="flex rounded-xl bg-slate-800/80 border border-white/5 p-0.5 shrink-0">
             {Object.entries(SCENARIOS).map(([k, s]) => (
               <button key={k} onClick={() => k !== scenario && reset(k)}
-                className={`px-2.5 py-2 text-[10px] font-bold whitespace-nowrap transition ${scenario === k ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-400"}`}>
+                className={`px-3 py-1.5 text-[10px] font-bold whitespace-nowrap rounded-lg transition ${scenario === k ? "bg-indigo-500 text-white shadow-md shadow-indigo-950/60" : "text-slate-400 hover:text-slate-200"}`}>
                 {s.short}
               </button>
             ))}
           </div>
+          <div className="flex rounded-xl bg-slate-800/80 border border-white/5 p-0.5 shrink-0" title="立体空間と平面分析を切り替え">
+            {[["3d", "🌐 3D空間"], ["2d", "🗺 2Dマップ"]].map(([v, label]) => (
+              <button key={v} onClick={() => setView(v)}
+                className={`px-3 py-1.5 text-[10px] font-bold whitespace-nowrap rounded-lg transition ${view === v ? "bg-cyan-600 text-white shadow-md shadow-cyan-950/60" : "text-slate-400 hover:text-slate-200"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
           <button onClick={() => setPlaying(p => !p)} disabled={ticking && !playing}
-            className={`flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-bold transition shrink-0 ${playing ? "bg-rose-600 hover:bg-rose-500" : "bg-emerald-600 hover:bg-emerald-500"}`}>
+            className={`flex items-center gap-1 rounded-xl px-3.5 py-2 text-xs font-bold transition shrink-0 border border-white/5 shadow-sm ${playing ? "bg-rose-600 hover:bg-rose-500" : "bg-emerald-600 hover:bg-emerald-500"}`}>
             {playing ? <Pause size={13}/> : <Play size={13}/>}{playing ? "停止" : "自動"}
           </button>
           {jumpBtn("1時間", tickHour, "bg-slate-700 hover:bg-slate-600")}
           {jumpBtn("1日", tickDay, "bg-cyan-800 hover:bg-cyan-700")}
           {jumpBtn("1ヶ月", tickMonth, "bg-violet-800 hover:bg-violet-700")}
           {jumpBtn("1年", tickYear, "bg-amber-700 hover:bg-amber-600")}
-          <button onClick={() => reset()} className="rounded-lg p-2 bg-slate-800 hover:bg-slate-700 shrink-0" title="リセット"><RotateCcw size={13}/></button>
+          <button onClick={() => reset()} className="rounded-xl p-2 bg-slate-800 hover:bg-slate-700 border border-white/5 shrink-0" title="リセット"><RotateCcw size={13}/></button>
         </div>
       </div>
 
       <div className="flex flex-1 min-h-0" style={{ flexDirection: isMobile ? "column" : "row" }}>
-        {/* ===== 俯瞰マップ ===== */}
-        <div className={`relative w-full min-w-0 overflow-hidden transition-colors duration-1000 ${isNight ? "bg-indigo-950" : "bg-sky-900"}`}
+        {/* ===== 俯瞰マップ(🌐3D空間 / 🗺2Dマップ) ===== */}
+        <div className="relative w-full min-w-0 overflow-hidden"
           style={isMobile ? { height: "44vh", minHeight: 250, flex: "none" } : { flex: 1 }}>
-          <div className="absolute top-2.5 left-1/2 -translate-x-1/2 z-20 bg-black/50 backdrop-blur rounded-full px-4 py-1.5 text-xs border border-white/10 max-w-[92%] whitespace-nowrap overflow-hidden text-ellipsis">
+          {view === "3d" ? (
+            <Suspense fallback={<div className="absolute inset-0 flex items-center justify-center bg-slate-900 text-xs text-slate-400">🌐 3D空間を読み込み中…</div>}>
+              <Map3D agents={agentPos} selected={selected} isNight={isNight}
+                onSelect={id => { setSelected(id); setInterview([]); }} />
+            </Suspense>
+          ) : (
+            <>
+              {/* 空(昼夜グラデーション)・ドットグリッド・ビネット */}
+              <div className="absolute inset-0 transition-all duration-1000" style={{
+                background: isNight
+                  ? "radial-gradient(120% 95% at 50% 30%, #241f52 0%, #131036 55%, #07051c 100%)"
+                  : "radial-gradient(120% 95% at 50% 30%, #10537a 0%, #0a3a58 55%, #051e30 100%)",
+              }} />
+              <div className="absolute inset-0" style={{
+                backgroundImage: "radial-gradient(rgba(255,255,255,.55) 1px, transparent 1.2px)",
+                backgroundSize: "28px 28px", opacity: isNight ? 0.1 : 0.08,
+              }} />
+              <div className="absolute inset-0 pointer-events-none" style={{ boxShadow: "inset 0 0 160px 30px rgba(0,0,0,.45)" }} />
+
+              {/* 街路(NEO HOUSEから各ゾーンへ) */}
+              <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+                {Object.values(ZONES).map((z, i) => (
+                  <path key={i} d={`M 50 40 Q ${(50 + z.x) / 2} ${(40 + z.y) / 2 - 3} ${z.x} ${z.y}`} fill="none"
+                    stroke="rgba(255,255,255,.18)" strokeWidth="0.35" strokeDasharray="0.12 1.5" strokeLinecap="round" />
+                ))}
+              </svg>
+
+              {Object.entries(ZONES).map(([key, z]) => {
+                const count = agents.filter(a => a.zone === key).length;
+                const zw = z.r * (isMobile ? 6.5 : 11), zh = z.r * (isMobile ? 5 : 9);
+                return (
+                  <div key={key} className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center pointer-events-none" style={{ left: `${z.x}%`, top: `${z.y}%` }}>
+                    <div className="rounded-full flex flex-col items-center justify-center backdrop-blur-[2px] transition-shadow duration-700"
+                      style={{
+                        width: zw, height: zh,
+                        background: `radial-gradient(ellipse at 50% 32%, ${z.color}3d 0%, ${z.color}14 55%, transparent 78%)`,
+                        border: `1.5px solid ${z.color}59`,
+                        boxShadow: `0 0 ${count > 6 ? 46 : 22}px ${z.color}${count > 6 ? "59" : "26"}, inset 0 0 34px ${z.color}1f`,
+                      }}>
+                      <div className={isMobile ? "text-base" : "text-2xl"} style={{ filter: `drop-shadow(0 0 8px ${z.color}aa)` }}>{z.icon}</div>
+                      <div className="text-[10px] font-bold tracking-[0.2em]" style={{ color: z.color, textShadow: "0 1px 6px rgba(0,0,0,.7)" }}>{z.name}</div>
+                      <div className="text-[10px] font-mono bg-black/50 border border-white/10 rounded-full px-2 py-px mt-1 text-slate-200">{count}</div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {agentPos.map(a => (
+                <div key={a.id} className="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer z-10 flex flex-col items-center group p-1.5 -m-1.5"
+                  style={{ left: `${a.px}%`, top: `${a.py}%`, transition: "left 1s ease, top 1s ease" }}
+                  onClick={() => { setSelected(a.id); setInterview([]); }}>
+                  {a.speech && <div className="absolute -top-9 whitespace-nowrap max-w-[180px] overflow-hidden text-ellipsis bg-white/95 text-slate-900 text-[10px] rounded-xl rounded-bl-sm px-2.5 py-1.5 shadow-xl font-medium z-20">{a.speech}</div>}
+                  {/* メンタル/体力が枯渇している住民はSOSサイン */}
+                  {(a.res.ment < 30 || a.res.stam < 25) && <div className="absolute -top-3.5 text-[11px] animate-pulse">🆘</div>}
+                  {a.emoji ? (
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-base border-2 border-white/90 transition-transform hover:scale-125 ${selected === a.id ? "ring-2 ring-yellow-300" : ""}`}
+                      style={{ background: `radial-gradient(circle at 32% 28%, rgba(255,255,255,.45), transparent 50%), ${a.color}`, boxShadow: `0 2px 10px rgba(0,0,0,.5), 0 0 14px ${a.color}66` }}>{a.emoji}</div>
+                  ) : (
+                    <div className={`w-[13px] h-[13px] rounded-full border border-white/70 transition-transform hover:scale-150 ${selected === a.id ? "ring-2 ring-yellow-300" : ""}`}
+                      style={{ background: `radial-gradient(circle at 32% 28%, rgba(255,255,255,.55), transparent 55%), ${a.color}`, boxShadow: `0 0 8px ${a.color}77`, opacity: 0.55 + a.happiness / 220 }} />
+                  )}
+                  <div className={`text-[8px] font-bold bg-black/70 rounded-full px-1.5 py-px mt-1 ${a.emoji ? "" : "opacity-0 group-hover:opacity-100 transition-opacity"}`}>{a.name}</div>
+                </div>
+              ))}
+            </>
+          )}
+
+          {/* 共通オーバーレイ(3D/2D両方に表示) */}
+          <div className="absolute top-2.5 left-1/2 -translate-x-1/2 z-20 bg-slate-950/60 backdrop-blur-md rounded-full px-4 py-1.5 text-xs border border-white/10 shadow-lg max-w-[92%] whitespace-nowrap overflow-hidden text-ellipsis">
             {ticking ? <span className="animate-pulse">🧠 {progress}分の社会を生成中…</span> : `🏙 ${worldNote}`}
           </div>
           {error && <div className="absolute top-11 left-1/2 -translate-x-1/2 z-20 bg-rose-600/90 rounded-lg px-3 py-1 text-xs max-w-[92%]">{error}</div>}
-
-          <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-            {Object.values(ZONES).map((z, i) => <line key={i} x1="50" y1="40" x2={z.x} y2={z.y} stroke="rgba(255,255,255,.07)" strokeWidth="1.2" />)}
-          </svg>
-
-          {Object.entries(ZONES).map(([key, z]) => {
-            const count = agents.filter(a => a.zone === key).length;
-            const zw = z.r * (isMobile ? 6.5 : 11), zh = z.r * (isMobile ? 5 : 9);
-            return (
-              <div key={key} className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center pointer-events-none" style={{ left: `${z.x}%`, top: `${z.y}%` }}>
-                <div className="rounded-full border-2 flex flex-col items-center justify-center"
-                  style={{ borderColor: z.color, background: `${z.color}1c`, width: zw, height: zh, boxShadow: count > 6 ? `0 0 28px ${z.color}66` : "none" }}>
-                  <div className={isMobile ? "text-sm" : "text-xl"}>{z.icon}</div>
-                  <div className="text-[9px] font-bold" style={{ color: z.color }}>{z.name}</div>
-                  <div className="text-[10px] font-mono bg-black/40 rounded-full px-1.5 mt-0.5">{count}</div>
-                </div>
-              </div>
-            );
-          })}
-
-          {agentPos.map(a => (
-            <div key={a.id} className="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer z-10 flex flex-col items-center group p-1.5 -m-1.5"
-              style={{ left: `${a.px}%`, top: `${a.py}%`, transition: "left 1s ease, top 1s ease" }}
-              onClick={() => { setSelected(a.id); setInterview([]); }}>
-              {a.speech && <div className="absolute -top-8 whitespace-nowrap max-w-[170px] overflow-hidden text-ellipsis bg-white text-slate-900 text-[9px] rounded-lg rounded-bl-none px-2 py-1 shadow-lg font-medium z-20">{a.speech}</div>}
-              {/* メンタル/体力が枯渇している住民はSOSサイン */}
-              {(a.res.ment < 30 || a.res.stam < 25) && <div className="absolute -top-3 text-[10px]">🆘</div>}
-              {a.emoji ? (
-                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-sm border-2 border-white shadow transition-transform hover:scale-125 ${selected === a.id ? "ring-2 ring-yellow-300" : ""}`} style={{ background: a.color }}>{a.emoji}</div>
-              ) : (
-                <div className={`w-3.5 h-3.5 rounded-full border border-white/70 shadow transition-transform hover:scale-150 ${selected === a.id ? "ring-2 ring-yellow-300" : ""}`} style={{ background: a.color, opacity: 0.45 + a.happiness / 180 }} />
-              )}
-              <div className={`text-[8px] font-bold bg-black/60 rounded-full px-1.5 mt-0.5 ${a.emoji ? "" : "opacity-0 group-hover:opacity-100 transition-opacity"}`}>{a.name}</div>
-            </div>
-          ))}
-
-          <div className="absolute bottom-2.5 left-3 z-20 bg-black/40 backdrop-blur rounded-lg px-3 py-1.5 text-[10px] text-slate-300 border border-white/10">
-            😊 幸福 <span className={`font-bold ${avgH > 65 ? "text-emerald-300" : avgH > 40 ? "text-amber-300" : "text-rose-300"}`}>{avgH}</span>
-            ・🌿 余白 <span className={`font-bold ${slackState(avgSlack).cls}`}>{avgSlack}</span>
-            ・🚩 挑戦 {challenges.filter(c => c.status === "active").length} ・🏛 文化 {institutions.length}
+          <div className="absolute bottom-3 left-3 z-20 flex items-center gap-2.5 bg-slate-950/60 backdrop-blur-md rounded-xl px-3.5 py-2 text-[10px] text-slate-300 border border-white/10 shadow-lg">
+            <span>😊 幸福 <b className={avgH > 65 ? "text-emerald-300" : avgH > 40 ? "text-amber-300" : "text-rose-300"}>{avgH}</b></span>
+            <span className="text-white/15">|</span>
+            <span>🌿 余白 <b className={slackState(avgSlack).cls}>{avgSlack}</b></span>
+            <span className="text-white/15">|</span>
+            <span>🚩 挑戦 {challenges.filter(c => c.status === "active").length}</span>
+            <span className="text-white/15">|</span>
+            <span>🏛 文化 {institutions.length}</span>
           </div>
+          {view === "3d" && (
+            <div className="absolute bottom-3 right-3 z-20 bg-slate-950/60 backdrop-blur-md rounded-xl px-3 py-1.5 text-[9px] text-slate-400 border border-white/10 shadow-lg">
+              🖱 ドラッグ:回転 / 右ドラッグ:移動 / ホイール:ズーム / 住民クリック:詳細
+            </div>
+          )}
         </div>
 
         {/* ===== パネル (モバイル:下 / PC:右) ===== */}
-        <div className={`bg-slate-900 flex flex-col min-h-0 ${isMobile ? "border-t w-full" : "border-l"} border-slate-800`}
-          style={isMobile ? { flex: 1 } : { width: 330, flex: "none" }}>
-          <div className="flex border-b border-slate-800 text-[11px] font-bold">
+        <div className={`bg-slate-950 flex flex-col min-h-0 ${isMobile ? "border-t w-full" : "border-l"} border-white/5`}
+          style={isMobile ? { flex: 1 } : { width: 336, flex: "none" }}>
+          <div className="flex border-b border-white/5 text-[11px] font-bold">
             {[["timeline", "年代記", Activity], ["metrics", "指標", Heart], ["challenges", "挑戦", Flag], ["culture", "文化", Landmark]].map(([k, label, Icon]) => (
-              <button key={k} onClick={() => setTab(k)} className={`flex-1 flex items-center justify-center gap-1 py-2.5 transition ${tab === k ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300"}`}>
+              <button key={k} onClick={() => setTab(k)} className={`relative flex-1 flex items-center justify-center gap-1.5 py-3 transition ${tab === k ? "text-white" : "text-slate-500 hover:text-slate-300"}`}>
                 <Icon size={12}/>{label}
+                {tab === k && <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-9 h-0.5 rounded-full bg-indigo-400" />}
               </button>
             ))}
           </div>
