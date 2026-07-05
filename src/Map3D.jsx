@@ -60,7 +60,7 @@ function makeSprite(text, { fontSize = 44, pad = 18, bg = null, color = "#1e293b
   return sprite;
 }
 
-export default function Map3D({ agents, selected, isNight, onSelect }) {
+export default function Map3D({ agents, selected, isNight, onSelect, stages = null }) {
   const mountRef = useRef(null);
   const stateRef = useRef({});   // three一式
   const agentsRef = useRef(agents);
@@ -131,6 +131,10 @@ export default function Map3D({ agents, selected, isNight, onSelect }) {
     });
     function MathPIhalf() { return Math.PI / 2; }
 
+    // 段階表示(移行期モード)用のメッシュ収集先
+    const stagedNeo = [[], [], []];   // NEO HOUSE 上層階 tier1..3
+    const stagedRobots = [];          // 農場ロボット
+
     // ゾーン: 白いプラットフォーム + 色付きリング + ランドマーク + ラベル
     Object.entries(ZONES).forEach(([key, z]) => {
       const cx = W(z.x), cz = W(z.y);
@@ -158,7 +162,7 @@ export default function Map3D({ agents, selected, isNight, onSelect }) {
         const glass = new THREE.MeshPhongMaterial({ color: 0xbfe4ff, transparent: true, opacity: 0.55, shininess: 120 });
         const warm = new THREE.MeshLambertMaterial({ color: 0xffe9b8, emissive: 0xffc46b, emissiveIntensity: 0.4 });
         const terrace = new THREE.MeshLambertMaterial({ color: 0x5cb571 });
-        [[9.2, 3.6, 2.3], [7.2, 3.2, 5.6], [5.2, 2.8, 8.5], [3.4, 2.4, 11.0]].forEach(([rr, h, y]) => {
+        [[9.2, 3.6, 2.3], [7.2, 3.2, 5.6], [5.2, 2.8, 8.5], [3.4, 2.4, 11.0]].forEach(([rr, h, y], tier) => {
           const core = new THREE.Mesh(new THREE.CylinderGeometry(rr * 0.42, rr * 0.42, h, 32), warm);
           core.position.set(cx, y, cz);
           const shell = new THREE.Mesh(new THREE.CylinderGeometry(rr, rr, h, 40), glass);
@@ -168,6 +172,8 @@ export default function Map3D({ agents, selected, isNight, onSelect }) {
           ledge.rotation.x = Math.PI / 2;
           ledge.position.set(cx, y + h / 2 + 0.12, cz);
           scene.add(core, shell, ledge);
+          // 上層階(tier 1〜3)は移行期モードで制度転換とともに「建設」される
+          if (tier > 0) stagedNeo[tier - 1].push(core, shell, ledge);
         });
         const plaza = new THREE.Mesh(new THREE.RingGeometry(r + 1.2, r + 3.2, 48),
           new THREE.MeshLambertMaterial({ color: 0xf5f0e0, transparent: true, opacity: 0.6 }));
@@ -238,6 +244,7 @@ export default function Map3D({ agents, selected, isNight, onSelect }) {
           new THREE.MeshLambertMaterial({ color: 0x0f172a, emissive: 0x38bdf8, emissiveIntensity: 0.8 }));
         visor.position.set(cx - 6.8, 2.85, cz - r * 0.42 + 0.62);
         scene.add(greenhouse, botBody, botHead, visor);
+        stagedRobots.push(botBody, botHead, visor);
       } else if (key === "food") {
         // 食: パラソル付きテラス席+Farm to Tableのキッチンカウンター
         [[-0.45, 0.25], [0.12, -0.35], [0.5, 0.28]].forEach(([dx, dz]) => {
@@ -521,7 +528,7 @@ export default function Map3D({ agents, selected, isNight, onSelect }) {
     };
     tick();
 
-    stateRef.current = { scene, agentGroup, agentMeshes };
+    stateRef.current = { scene, agentGroup, agentMeshes, stagedNeo, stagedRobots, droneGroups: drones.map(d => d.g) };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -540,6 +547,18 @@ export default function Map3D({ agents, selected, isNight, onSelect }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ===== 段階表示の同期(移行期モード: 制度転換で街が"建設"される) =====
+  useEffect(() => {
+    const st = stateRef.current;
+    if (!st.scene) return;
+    const tiers = stages ? stages.neoTiers : 3;
+    st.stagedNeo.forEach((arr, i) => arr.forEach(m => { m.visible = i < tiers; }));
+    const showRobots = stages ? stages.robots : true;
+    st.stagedRobots.forEach(m => { m.visible = showRobots; });
+    const showDrones = stages ? stages.drones : true;
+    st.droneGroups.forEach(g => { g.visible = showDrones; });
+  }, [stages?.neoTiers, stages?.robots, stages?.drones, webglError]);
 
   // ===== 住民の同期(agents変化時) =====
   useEffect(() => {

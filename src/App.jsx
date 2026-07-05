@@ -9,8 +9,15 @@ import {
 } from "./engine/population.js";
 import { fbHour, fbDay, fbMonth, fbYear, fbNoted, markFbNoted, resetFbNoted } from "./engine/fallback.js";
 import { SCENARIOS, HOUR_SYSTEM, DAY_SYSTEM, MONTH_SYSTEM, YEAR_SYSTEM, rosterText } from "./engine/prompts.js";
+import {
+  TRANSITION, MILESTONES, TR_HOUR_SYSTEM, TR_DAY_SYSTEM, TR_MONTH_SYSTEM, TR_YEAR_SYSTEM,
+  trIncome, trIncomeLabel, trJumpIncome, applyMilestones, trFallbackScenario, fbTrMilestones,
+} from "./engine/transition.js";
 import { callClaude, parseJSON } from "./api.js";
 import { saveRun, listRuns, loadRun, deleteRun } from "./store.js";
+
+// 表示用シナリオ一覧: 統制条件の3シナリオ + 移行期(創発)モード
+const ALL_SCENARIOS = { ...SCENARIOS, transition: TRANSITION };
 
 /* ============================================================
    NEO 2050 SOCIETY SIMULATOR v3.3 — 余白理論エンジン(Web版)
@@ -19,6 +26,10 @@ import { saveRun, listRuns, loadRun, deleteRun } from "./store.js";
 
 // ---------- 時刻 ----------
 const START = new Date(2050, 0, 1, 7, 0);
+// 移行期モードは現実の2026年からスタート
+const startFor = scn => scn === "transition" ? new Date(2026, 0, 1, 7, 0) : new Date(START);
+// 移行期の初期人口は「現代日本」条件(統制条件のgeneretePopulationはそのまま利用)
+const populationFor = scn => generatePopulation(scn === "transition" ? "current" : scn);
 const fmtDate = d => `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, "0")}:00`;
 const shortLabel = d => `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}時`;
 
@@ -79,6 +90,7 @@ export default function NeoSimulator() {
   const [error, setError] = useState(null);
   const [report, setReport] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
+  const [flags, setFlags] = useState({});        // 移行期モードの成立済み制度転換 {key: 成立年}
   const [runId, setRunId] = useState(null);      // Supabase上の記録ID(保存後は同じ記録に上書き)
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
@@ -88,7 +100,7 @@ export default function NeoSimulator() {
   const zoneHoursRef = useRef({ house: 0, culture: 0, sports: 0, robots: 0, food: 0, home: 0 });
   const issuedRef = useRef(0); // BI累計支給額(循環率の分母)
   const stateRef = useRef({});
-  stateRef.current = { agents, now, challenges, events, ticking, playing, institutions, metrics, scenario, customRules, eraName, worldNote };
+  stateRef.current = { agents, now, challenges, events, ticking, playing, institutions, metrics, scenario, customRules, eraName, worldNote, flags };
 
   const pushEvents = (list, arr) => [...list, ...arr].slice(-120);
   const noise = amp => Math.round((Math.random() * 2 - 1) * amp);
@@ -216,6 +228,17 @@ export default function NeoSimulator() {
         agentsNow = agentsNow.map(a => { const d = Math.max(0, CAP_FLOOR - a.support); topup += d; return { ...a, support: a.support + d }; });
         issuedRef.current += topup;
         if (topup > 0) evs.push({ t, icon: "💙", text: `充足BI: 資本が水準未満の住民に計${topup}pt補填(財源:ロボット生産益)`, type: "system" });
+      } else if (S.scenario === "transition") {
+        // 移行期: フェーズに応じて 賃金→+配当→+部分BI→充足BI と変化
+        const totalSup = agentsNow.reduce((s2, a) => s2 + a.support, 0) || 1;
+        let paid = 0;
+        agentsNow = agentsNow.map(a => {
+          const inc = trJumpIncome(a, S.flags, 1, totalSup);
+          paid += inc;
+          return { ...a, support: a.support + inc };
+        });
+        issuedRef.current += paid;
+        if (paid > 0) evs.push({ t, icon: "💙", text: trIncomeLabel(S.flags), type: "system" });
       } else {
         agentsNow = agentsNow.map(a => ({ ...a, support: a.support + (a.dailyIncome || 0) }));
         issuedRef.current += agentsNow.reduce((s2, a) => s2 + (a.dailyIncome || 0), 0);
@@ -230,9 +253,10 @@ export default function NeoSimulator() {
 
     const prompt = `${next.getMonth()+1}月${next.getDate()}日 ${h}:00。\n【注目住民】\n${spots.map(a => `${a.id}(${a.name},${a.age}):${a.persona}目標:${a.goal} 現在地:${a.zone} 幸福:${a.happiness} 余白:${a.slack} 弱点資源:${weakest(a)} 応援pt:${a.support} 記憶:${a.memories.slice(-2).join("/") || "無"}`).join("\n")}\n【進行中の挑戦】${S.challenges.filter(c=>c.status==="active").map(c=>`「${c.name}」(${c.ownerName},${c.progress}/3)`).join(",")||"なし"}\n【直近】${S.events.slice(-3).map(e=>e.text).join("/")||"なし"}\n【施行中の追加ルール】${S.customRules.join(" / ") || "なし"}`;
     let result;
-    try { result = parseJSON(await callClaude(HOUR_SYSTEM(S.scenario), prompt)); }
+    const hourSys = S.scenario === "transition" ? TR_HOUR_SYSTEM(S.flags, S.now.getFullYear()) : HOUR_SYSTEM(S.scenario);
+    try { result = parseJSON(await callClaude(hourSys, prompt)); }
     catch (fe) {
-      result = fbHour(S, spots);
+      result = fbHour(S.scenario === "transition" ? { ...S, scenario: trFallbackScenario(S.flags) } : S, spots);
       if (!fbNoted()) { markFbNoted(); evs.push({ t, icon: "🤖", text: `AI生成が使えないため簡易エンジンで進行(${String(fe && fe.message).slice(0, 60)})`, type: "system" }); }
     }
 
@@ -252,7 +276,9 @@ export default function NeoSimulator() {
       return { ...a, zone, _e: e };
     });
     const capAvg = positioned.reduce((s, a) => s + normCap(a.support), 0) / positioned.length;
-    const ctx = { challenges: newCh, zoneCount: zoneMap, mood, capAvg, scn: S.scenario };
+    // 移行期は充足BI完全実施後にpost相当(労働が時間を奪わない)へ切り替わる
+    const effScn = S.scenario === "transition" ? (S.flags.bi_full ? "post" : "current") : S.scenario;
+    const ctx = { challenges: newCh, zoneCount: zoneMap, mood, capAvg, scn: effScn };
 
     let updated = positioned.map(a => {
       const e = a._e;
@@ -307,7 +333,9 @@ export default function NeoSimulator() {
     const r = { ...a.res };
     const own = chList.filter(c => c.owner === a.id && c.status === "active").length;
     const completedOwn = chList.some(c => c.owner === a.id && c.status === "done");
-    r.time = clamp((a.works && stateRef.current.scenario !== "post" ? 58 : 88) - own * 14 + noise(4));
+    const S0 = stateRef.current;
+    const freeTime = S0.scenario === "post" || (S0.scenario === "transition" && S0.flags.bi_full);
+    r.time = clamp((a.works && !freeTime ? 58 : 88) - own * 14 + noise(4));
     r.stam = clamp(r.stam + (75 - r.stam) * Math.min(1, days / 20) + noise(5));
     r.conn = clamp(r.conn + (own || completedOwn ? 6 : -4) * Math.min(3, days / 10) + noise(5));
     r.chal = own > 0 ? clamp(60 + noise(10)) : completedOwn ? clamp(75 + noise(8)) : clamp(r.chal + (36 - r.chal) * 0.5 + noise(6));
@@ -321,20 +349,24 @@ export default function NeoSimulator() {
     const next = new Date(S.now.getTime() + 86400000);
     const t = `${next.getMonth() + 1}/${next.getDate()}`;
     let result, fbMsg = null;
-    try { result = parseJSON(await callClaude(DAY_SYSTEM(S.scenario), `${t}の1日分を生成。\n${rosterText(S.agents, S.challenges)}\n【直近】${S.events.slice(-3).map(e=>e.text).join("/")||"なし"}\n【施行中の追加ルール】${S.customRules.join(" / ") || "なし"}`)); }
-    catch (fe) { result = fbDay(S); fbMsg = fe && fe.message; }
+    const daySys = S.scenario === "transition" ? TR_DAY_SYSTEM(S.flags, S.now.getFullYear()) : DAY_SYSTEM(S.scenario);
+    try { result = parseJSON(await callClaude(daySys, `${t}の1日分を生成。\n${rosterText(S.agents, S.challenges)}\n【直近】${S.events.slice(-3).map(e=>e.text).join("/")||"なし"}\n【施行中の追加ルール】${S.customRules.join(" / ") || "なし"}`)); }
+    catch (fe) { result = fbDay(S.scenario === "transition" ? { ...S, scenario: trFallbackScenario(S.flags) } : S); fbMsg = fe && fe.message; }
     const evs = [{ t, icon: "📅", text: `【1日経過】${result.headline}`, type: "system" }];
     if (fbMsg && !fbNoted()) { markFbNoted(); evs.push({ t, icon: "🤖", text: `AI生成が使えないため簡易エンジンで進行(${String(fbMsg).slice(0, 60)})`, type: "system" }); }
     (result.highlights || []).forEach(hl => hl.text && evs.push({ t, icon: hl.icon || "・", text: hl.text, type: "action" }));
     let newCh = applyChallenges(S.challenges, { create: result.newChallenges, prog: result.progressChallenges, done: result.completedChallenges }, S.agents, evs, t);
     let fundGains = {};
-    if (S.scenario === "post") {
+    if (S.scenario === "post" || (S.scenario === "transition" && S.flags.fund_law)) {
       const fr = applyFund(newCh, null, 1 / 30, evs, t);
       newCh = fr.chList; fundGains = fr.gains;
     }
     const dist = distributeFlow(S.agents, newCh, result.supportFlow || 100);
+    const totalSupD = S.agents.reduce((s, a) => s + a.support, 0) || 1;
     const updated = S.agents.map(a => {
-      const inc = S.scenario === "post" ? Math.max(0, CAP_FLOOR - a.support) : (a.dailyIncome || 0);
+      const inc = S.scenario === "post" ? Math.max(0, CAP_FLOOR - a.support)
+        : S.scenario === "transition" ? trJumpIncome(a, S.flags, 1, totalSupD)
+        : (a.dailyIncome || 0);
       issuedRef.current += inc;
       const arc = (result.highlights || []).find(x => x.agentId === a.id && x.text);
       return finalize({ ...a, speech: null, support: a.support + inc + (fundGains[a.id] || 0), recv: (a.recv || 0) + (dist[a.id] || 0) + (fundGains[a.id] || 0),
@@ -355,8 +387,9 @@ export default function NeoSimulator() {
     const next = new Date(S.now); next.setMonth(next.getMonth() + 1);
     const t = `${next.getFullYear()}年${next.getMonth() + 1}月`;
     let result, fbMsg = null;
-    try { result = parseJSON(await callClaude(MONTH_SYSTEM(S.scenario), `${t}までの1ヶ月分を生成。\n${rosterText(S.agents, S.challenges)}\n【定着済みの文化】${S.institutions.join(",")||"なし"}\n【施行中の追加ルール】${S.customRules.join(" / ") || "なし"}`)); }
-    catch (fe) { result = fbMonth(S); fbMsg = fe && fe.message; }
+    const monthSys = S.scenario === "transition" ? TR_MONTH_SYSTEM(S.flags, S.now.getFullYear()) : MONTH_SYSTEM(S.scenario);
+    try { result = parseJSON(await callClaude(monthSys, `${t}までの1ヶ月分を生成。\n${rosterText(S.agents, S.challenges)}\n【定着済みの文化】${S.institutions.join(",")||"なし"}\n【施行中の追加ルール】${S.customRules.join(" / ") || "なし"}`)); }
+    catch (fe) { result = fbMonth(S.scenario === "transition" ? { ...S, scenario: trFallbackScenario(S.flags) } : S); fbMsg = fe && fe.message; }
     const evs = [{ t, icon: "🗓", text: `【1ヶ月経過】${result.headline}`, type: "epoch" }];
     if (fbMsg && !fbNoted()) { markFbNoted(); evs.push({ t, icon: "🤖", text: `AI生成が使えないため簡易エンジンで進行(${String(fbMsg).slice(0, 60)})`, type: "system" }); }
     (result.trends || []).forEach(x => x.text && evs.push({ t, icon: x.icon || "📈", text: x.text, type: "trend" }));
@@ -370,13 +403,16 @@ export default function NeoSimulator() {
     const newInst = [...S.institutions, ...(result.newInstitutions || [])];
     (result.newInstitutions || []).forEach(n => evs.push({ t, icon: "🏛", text: `「${n}」が街の文化として定着`, type: "institution" }));
     let fundGains = {};
-    if (S.scenario === "post") {
+    if (S.scenario === "post" || (S.scenario === "transition" && S.flags.fund_law)) {
       const fr = applyFund(newCh, null, 1, evs, t);
       newCh = fr.chList; fundGains = fr.gains;
     }
     const dist = distributeFlow(S.agents, newCh, result.supportFlow || 3000);
+    const totalSupM = S.agents.reduce((s, a) => s + a.support, 0) || 1;
     const updated = S.agents.map(a => {
-      const inc = S.scenario === "post" ? Math.max(0, CAP_FLOOR - a.support) : (a.dailyIncome || 0) * 30;
+      const inc = S.scenario === "post" ? Math.max(0, CAP_FLOOR - a.support)
+        : S.scenario === "transition" ? trJumpIncome(a, S.flags, 30, totalSupM)
+        : (a.dailyIncome || 0) * 30;
       issuedRef.current += inc;
       const arc = (result.arcs || []).find(x => x.agentId === a.id && x.text);
       return finalize({ ...a, speech: null, support: a.support + inc + (fundGains[a.id] || 0), recv: (a.recv || 0) + (dist[a.id] || 0) + (fundGains[a.id] || 0),
@@ -397,9 +433,34 @@ export default function NeoSimulator() {
     const next = new Date(S.now); next.setFullYear(next.getFullYear() + 1);
     const t = `${next.getFullYear()}年`;
     let result, fbMsg = null;
-    try { result = parseJSON(await callClaude(YEAR_SYSTEM(S.scenario), `${S.now.getFullYear()}年の1年分を生成。\n${rosterText(S.agents, S.challenges)}\n【定着済みの文化】${S.institutions.join(",")||"なし"}\n【平均幸福度】${Math.round(S.agents.reduce((s,a)=>s+a.happiness,0)/S.agents.length)} 【平均余白】${(S.agents.reduce((s,a)=>s+a.slack,0)/S.agents.length).toFixed(1)}\n【施行中の追加ルール】${S.customRules.join(" / ") || "なし"}`)); }
-    catch (fe) { result = fbYear(S); fbMsg = fe && fe.message; }
+    const yearSys = S.scenario === "transition" ? TR_YEAR_SYSTEM(S.flags, S.now.getFullYear()) : YEAR_SYSTEM(S.scenario);
+    const yearExtra = S.scenario === "transition"
+      ? `\n【就労者数】${S.agents.filter(a => a.works).length}/50 【現在の年】${S.now.getFullYear()}年(2050年まであと${Math.max(0, 2050 - S.now.getFullYear())}年)`
+      : "";
+    try { result = parseJSON(await callClaude(yearSys, `${S.now.getFullYear()}年の1年分を生成。\n${rosterText(S.agents, S.challenges)}\n【定着済みの文化】${S.institutions.join(",")||"なし"}\n【平均幸福度】${Math.round(S.agents.reduce((s,a)=>s+a.happiness,0)/S.agents.length)} 【平均余白】${(S.agents.reduce((s,a)=>s+a.slack,0)/S.agents.length).toFixed(1)}${yearExtra}\n【施行中の追加ルール】${S.customRules.join(" / ") || "なし"}`)); }
+    catch (fe) {
+      result = fbYear(S.scenario === "transition" ? { ...S, scenario: trFallbackScenario(S.flags) } : S);
+      if (S.scenario === "transition") result.milestones = fbTrMilestones(S.flags, next.getFullYear());
+      fbMsg = fe && fe.message;
+    }
     const evs = [{ t, icon: "🌏", text: `【1年経過】${result.eraName}`, type: "epoch" }];
+
+    // ===== 移行期: 制度転換の創発的成立(前提条件・重複はコードで検証) =====
+    let nf = S.flags;
+    if (S.scenario === "transition") {
+      const mr = applyMilestones(S.flags, result.milestones, next.getFullYear());
+      nf = mr.flags;
+      mr.applied.forEach(k => evs.push({ t, icon: MILESTONES[k].icon, text: `【制度転換】${MILESTONES[k].label}が成立 — ${MILESTONES[k].desc}`, type: "epoch" }));
+      if (S.now.getFullYear() < 2050 && next.getFullYear() >= 2050) {
+        evs.push({
+          t, icon: "🗼", type: "epoch",
+          text: nf.bi_full
+            ? "【2050年到達】応援資本主義への移行が完了。NEOタウンの物語はここから始まる"
+            : `【2050年到達】移行はまだ道半ば(成立した転換 ${Object.keys(nf).length}/5)。社会は変わり続ける`,
+        });
+      }
+      setFlags(nf);
+    }
     if (fbMsg && !fbNoted()) { markFbNoted(); evs.push({ t, icon: "🤖", text: `AI生成が使えないため簡易エンジンで進行(${String(fbMsg).slice(0, 60)})`, type: "system" }); }
     (result.transformations || []).forEach(x => x.text && evs.push({ t, icon: x.icon || "🌐", text: x.text, type: "trend" }));
     (result.arcs || []).forEach(x => {
@@ -413,19 +474,30 @@ export default function NeoSimulator() {
     const newInst = [...S.institutions, ...(result.newInstitutions || [])];
     (result.newInstitutions || []).forEach(n => evs.push({ t, icon: "🏛", text: `「${n}」が制度・文化として定着`, type: "institution" }));
     let fundGains = {};
-    if (S.scenario === "post") {
+    if (S.scenario === "post" || (S.scenario === "transition" && nf.fund_law)) {
       const fr = applyFund(newCh, null, 12, evs, t);
       newCh = fr.chList; fundGains = fr.gains;
     }
     const dist = distributeFlow(S.agents, newCh, result.supportFlow || 50000);
+    const totalSupY = S.agents.reduce((s, a) => s + a.support, 0) || 1;
+    let jobsLost = 0;
     const updated = S.agents.map(a => {
-      const inc = S.scenario === "post" ? Math.max(0, CAP_FLOOR - a.support) : (a.dailyIncome || 0) * 365;
+      // 移行期: 自動化の波の成立後は毎年一定割合が職を失う(充足BIまで)
+      let base = a;
+      if (S.scenario === "transition" && nf.auto_wave && !nf.bi_full && a.works && Math.random() < 0.12) {
+        base = { ...a, works: false, dailyIncome: a.age >= 65 ? 28 : 12 };
+        jobsLost++;
+      }
+      const inc = S.scenario === "post" ? Math.max(0, CAP_FLOOR - base.support)
+        : S.scenario === "transition" ? trJumpIncome(base, nf, 365, totalSupY)
+        : (base.dailyIncome || 0) * 365;
       issuedRef.current += inc;
       const arc = (result.arcs || []).find(x => x.agentId === a.id && x.text);
-      return finalize({ ...a, age: a.age + 1, speech: null, support: a.support + inc + (fundGains[a.id] || 0), recv: (a.recv || 0) + (dist[a.id] || 0) + (fundGains[a.id] || 0),
-        res: stepResourcesJump(a, 365, result.dMental || 0, newCh),
-        memories: [...a.memories.slice(-6), `${t}:${arc ? arc.text : "1年が過ぎ、少し歳を重ねた"}`] });
+      return finalize({ ...base, age: base.age + 1, speech: null, support: base.support + inc + (fundGains[a.id] || 0), recv: (base.recv || 0) + (dist[a.id] || 0) + (fundGains[a.id] || 0),
+        res: stepResourcesJump(base, 365, result.dMental || 0, newCh),
+        memories: [...base.memories.slice(-6), `${t}:${arc ? arc.text : "1年が過ぎ、少し歳を重ねた"}`] });
     });
+    if (jobsLost > 0) evs.push({ t, icon: "🤖", text: `自動化により今年${jobsLost}人が職を失った`, type: "risk" });
     setAgents(updated); setChallenges(newCh); setInstitutions(newInst);
     setEraName(result.eraName);
     setEvents(ev => pushEvents(ev, evs));
@@ -477,7 +549,10 @@ export default function NeoSimulator() {
       const burnout = S.agents.filter(a => a.res.ment < 35 || a.res.stam < 30).map(a => a.name).slice(0, 5).join(",");
       const avgBy = f => { const g = S.agents.filter(f); return g.length ? Math.round(g.reduce((s, a) => s + a.happiness, 0) / g.length) : "-"; };
       const demo = `男${avgBy(a=>a.sex==="男")}/女${avgBy(a=>a.sex==="女")} 若年(〜39)${avgBy(a=>a.age<=39)}/中年${avgBy(a=>a.age>39&&a.age<65)}/高齢${avgBy(a=>a.age>=65)} 富裕層${avgBy(a=>a.isRich)}/非富裕${avgBy(a=>!a.isRich)}`;
-      const data = `シナリオ: ${SCENARIOS[S.scenario].label}
+      const trLine = S.scenario === "transition"
+        ? `\n成立済みの制度転換: ${Object.entries(S.flags).map(([k, y]) => `${MILESTONES[k].label}(${y}年)`).join(",") || "なし"} / 就労者数 ${S.agents.filter(a => a.works).length}/50`
+        : "";
+      const data = `シナリオ: ${ALL_SCENARIOS[S.scenario].label}${trLine}
 期間: 2050/1/1〜${fmtDate(S.now)}
 挑戦者: ${m0 ? m0.挑戦者数 : 0}人 → ${mN ? mN.挑戦者数 : 0}人 (人口50) 累計挑戦${S.challenges.length}件(実現${S.challenges.filter(c=>c.status==="done").length}件)
 資本: ジニ係数 ${m0 ? m0.資本偏り : 0} → ${mN ? mN.資本偏り : 0} / 上位20%シェア ${top20}% / 循環率(応援流通÷BI支給) ${mN ? mN.循環率 : 0}%
@@ -488,7 +563,7 @@ export default function NeoSimulator() {
 属性別平均幸福: ${demo}
 消耗が心配な住民: ${burnout || "なし"} / 定着文化: ${S.institutions.join(",") || "なし"}
 施行中の追加ルール: ${S.customRules.join(" / ") || "なし(基金配分・挑戦認定・所有権は未整備)"}`;
-      const sys = `あなたは応援資本主義シミュレーションの観測研究者。哲学:「豊かさはちょうど良い余白(最適≈12)。不足は窮屈、過剰は退屈」。「${SCENARIOS[S.scenario].label}」型社会(${SCENARIOS[S.scenario].desc})のデータから以下を分析: ①挑戦者は増えたか ②資本の偏りと循環(蓄財と応援循環のどちらが優勢か) ③人は何に時間を使っているか ④余白は適正か ⑤富はまだ尊敬を集めるか(富裕層vs挑戦者への応援シェアから判断) ⑥格差(男女・世代・貧富)は幸福差を生んでいるか。各見出し2文で数値を引用。良い面だけでなく問題や悪化も正直に指摘すること。最後に「この社会で目指される生き方」を総評2文で。装飾記号やマークダウン禁止。`;
+      const sys = `あなたは応援資本主義シミュレーションの観測研究者。哲学:「豊かさはちょうど良い余白(最適≈12)。不足は窮屈、過剰は退屈」。「${ALL_SCENARIOS[S.scenario].label}」型社会(${ALL_SCENARIOS[S.scenario].desc})のデータから以下を分析: ①挑戦者は増えたか ②資本の偏りと循環(蓄財と応援循環のどちらが優勢か) ③人は何に時間を使っているか ④余白は適正か ⑤富はまだ尊敬を集めるか(富裕層vs挑戦者への応援シェアから判断) ⑥格差(男女・世代・貧富)は幸福差を生んでいるか。各見出し2文で数値を引用。良い面だけでなく問題や悪化も正直に指摘すること。最後に「この社会で目指される生き方」を総評2文で。装飾記号やマークダウン禁止。`;
       const ans = await callClaude(sys, data);
       setReport({ text: ans, t: fmtDate(S.now) });
     } catch (e) {
@@ -527,11 +602,12 @@ export default function NeoSimulator() {
       metrics: S.metrics,
       eraName: S.eraName,
       worldNote: S.worldNote,
+      flags: S.flags,
       zoneHours: { ...zoneHoursRef.current },
       issued: issuedRef.current,
     };
   };
-  const runTitle = () => `${SCENARIOS[stateRef.current.scenario].short} ${fmtDate(stateRef.current.now)}`;
+  const runTitle = () => `${ALL_SCENARIOS[stateRef.current.scenario].short} ${fmtDate(stateRef.current.now)}`;
 
   const doSave = async () => {
     if (saveBusy) return;
@@ -568,7 +644,7 @@ export default function NeoSimulator() {
     setScenario(s.scenario); setAgents(s.agents); setNow(new Date(s.now));
     setEvents(s.events || []); setChallenges(s.challenges || []); setInstitutions(s.institutions || []);
     setCustomRules(s.customRules || []); setMetrics(s.metrics || []);
-    setEraName(s.eraName || null); setWorldNote(s.worldNote || "");
+    setEraName(s.eraName || null); setWorldNote(s.worldNote || ""); setFlags(s.flags || {});
     zoneHoursRef.current = s.zoneHours || { house: 0, culture: 0, sports: 0, robots: 0, food: 0, home: 0 };
     issuedRef.current = s.issued || 0;
     setSelected(null); setInterview([]); setReport(null); setError(null);
@@ -593,14 +669,14 @@ export default function NeoSimulator() {
   };
 
   const reset = (scn = stateRef.current.scenario) => {
-    setPlaying(false); setScenario(scn); setAgents(generatePopulation(scn)); setNow(new Date(START));
-    setEvents([]); setChallenges([]); setInstitutions([]); setMetrics([]); setCustomRules([]);
+    setPlaying(false); setScenario(scn); setAgents(populationFor(scn)); setNow(startFor(scn));
+    setEvents([]); setChallenges([]); setInstitutions([]); setMetrics([]); setCustomRules([]); setFlags({});
     setSelected(null); setInterview([]); setEraName(null); setReport(null);
     zoneHoursRef.current = { house: 0, culture: 0, sports: 0, robots: 0, food: 0, home: 0 };
     issuedRef.current = 0;
     resetFbNoted();
     setRunId(null); // リセット後は別の記録として保存する
-    setWorldNote("2050年1月1日、シミュレーション待機中"); setError(null);
+    setWorldNote(`${startFor(scn).getFullYear()}年1月1日、シミュレーション待機中`); setError(null);
   };
 
   const enactRule = () => {
@@ -647,11 +723,16 @@ export default function NeoSimulator() {
             <span className="text-[9px] font-bold text-slate-500 tracking-widest">2050・余白理論 v3.3</span>
           </div>
           {eraName && <div className="text-[10px] bg-indigo-500/15 border border-indigo-400/30 rounded-full px-3 py-1 text-indigo-200 truncate">{eraName}</div>}
+          {scenario === "transition" && (
+            <div className="text-[10px] bg-cyan-500/15 border border-cyan-400/30 rounded-full px-3 py-1 text-cyan-200 shrink-0 whitespace-nowrap" title="創発的に成立した制度転換の数">
+              🧭 制度転換 {Object.keys(flags).length}/5
+            </div>
+          )}
           <div className="ml-auto text-[10px] md:text-xs font-mono bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 shrink-0 whitespace-nowrap text-slate-200">{fmtDate(now)} {isNight ? "🌙" : "☀️"}</div>
         </div>
         <div className="flex items-center gap-2 overflow-x-auto pb-0.5" style={{ WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}>
           <div className="flex rounded-xl bg-slate-800/80 border border-white/5 p-0.5 shrink-0">
-            {Object.entries(SCENARIOS).map(([k, s]) => (
+            {Object.entries(ALL_SCENARIOS).map(([k, s]) => (
               <button key={k} onClick={() => k !== scenario && reset(k)}
                 className={`px-3 py-1.5 text-[10px] font-bold whitespace-nowrap rounded-lg transition ${scenario === k ? "bg-indigo-500 text-white shadow-md shadow-indigo-950/60" : "text-slate-400 hover:text-slate-200"}`}>
                 {s.short}
@@ -693,6 +774,11 @@ export default function NeoSimulator() {
           {view === "3d" ? (
             <Suspense fallback={<div className="absolute inset-0 flex items-center justify-center bg-slate-900 text-xs text-slate-400">🌐 3D空間を読み込み中…</div>}>
               <Map3D agents={agentPos} selected={selected} isNight={isNight}
+                stages={scenario === "transition" ? {
+                  neoTiers: (flags.support_law ? 1 : 0) + (flags.bi_trial ? 1 : 0) + (flags.bi_full ? 1 : 0),
+                  robots: !!flags.auto_wave,
+                  drones: !!flags.auto_wave,
+                } : null}
                 onSelect={id => { setSelected(id); setInterview([]); }} />
             </Suspense>
           ) : (
@@ -942,6 +1028,22 @@ export default function NeoSimulator() {
 
             {tab === "culture" && (
               <div className="space-y-3">
+                {/* 移行期: 制度転換の成立状況(創発) */}
+                {scenario === "transition" && (
+                  <div>
+                    <div className="text-[11px] font-bold text-slate-400 mb-1.5">🧭 2050年への制度転換 <span className="text-slate-600 font-normal">(年表ではなく社会的圧力から創発)</span></div>
+                    <div className="space-y-1">
+                      {Object.entries(MILESTONES).map(([k, m]) => (
+                        <div key={k} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] border ${flags[k] ? "bg-cyan-950/40 border-cyan-700/40" : "bg-slate-800/40 border-white/5 text-slate-500"}`}
+                          title={m.desc}>
+                          <span className="shrink-0">{m.icon}</span>
+                          <span className="flex-1 min-w-0 truncate">{m.label}</span>
+                          <span className={`font-mono text-[9px] shrink-0 ${flags[k] ? "text-cyan-300" : ""}`}>{flags[k] ? `${flags[k]}年 成立` : "未成立"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {/* 制度ルール設計 */}
                 <div>
                   <div className="text-[11px] font-bold text-slate-400 mb-1.5">⚖️ 制度ルール(問題が生まれたら、ここで設計して施行)</div>
@@ -1063,7 +1165,7 @@ export default function NeoSimulator() {
                 <div key={r.id} className={`flex items-center gap-2.5 bg-slate-800/70 border rounded-xl px-3 py-2.5 ${r.id === runId ? "border-cyan-500/50" : "border-white/5"}`}>
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-bold truncate">{r.title || "(無題)"} {r.id === runId && <span className="text-[9px] text-cyan-300 font-normal">← 現在の記録</span>}</div>
-                    <div className="text-[9px] text-slate-500 font-mono">{SCENARIOS[r.scenario]?.short || r.scenario} ・ 更新 {new Date(r.updated_at).toLocaleString("ja-JP")}</div>
+                    <div className="text-[9px] text-slate-500 font-mono">{ALL_SCENARIOS[r.scenario]?.short || r.scenario} ・ 更新 {new Date(r.updated_at).toLocaleString("ja-JP")}</div>
                   </div>
                   <button onClick={() => doLoad(r.id)} className="bg-cyan-700 hover:bg-cyan-600 rounded-lg px-3 py-1.5 text-[11px] font-bold shrink-0">読込</button>
                   <button onClick={() => doDelete(r.id)} className="text-slate-500 hover:text-rose-400 p-1.5 shrink-0" title="削除"><X size={13}/></button>
