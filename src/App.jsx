@@ -90,6 +90,10 @@ export default function NeoSimulator() {
   const [error, setError] = useState(null);
   const [report, setReport] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
+  const [reportChat, setReportChat] = useState([]);       // レポートについての議論スレッド
+  const [reportQ, setReportQ] = useState("");
+  const [reportChatLoading, setReportChatLoading] = useState(false);
+  const reportDataRef = useRef("");                        // レポート生成時の観測データ(議論の文脈用)
   const [flags, setFlags] = useState({});        // 移行期モードの成立済み制度転換 {key: 成立年}
   const [runId, setRunId] = useState(null);      // Supabase上の記録ID(保存後は同じ記録に上書き)
   const [saveBusy, setSaveBusy] = useState(false);
@@ -549,6 +553,10 @@ export default function NeoSimulator() {
       const burnout = S.agents.filter(a => a.res.ment < 35 || a.res.stam < 30).map(a => a.name).slice(0, 5).join(",");
       const avgBy = f => { const g = S.agents.filter(f); return g.length ? Math.round(g.reduce((s, a) => s + a.happiness, 0) / g.length) : "-"; };
       const demo = `男${avgBy(a=>a.sex==="男")}/女${avgBy(a=>a.sex==="女")} 若年(〜39)${avgBy(a=>a.age<=39)}/中年${avgBy(a=>a.age>39&&a.age<65)}/高齢${avgBy(a=>a.age>=65)} 富裕層${avgBy(a=>a.isRich)}/非富裕${avgBy(a=>!a.isRich)}`;
+      const yr = S.metrics.filter(m => /^\d{4}年$/.test(m.label));
+      const yearlyLine = yr.length
+        ? `\n年次推移(年: 幸福/余白/挑戦者数/資本ジニ/循環%/メンタル):\n${yr.map(m => `${m.label} ${m.幸福度}/${m.余白}/${m.挑戦者数}/${m.資本偏り}/${m.循環率}/${m.メンタル}`).join("\n")}`
+        : "";
       const trLine = S.scenario === "transition"
         ? `\n成立済みの制度転換: ${Object.entries(S.flags).map(([k, y]) => `${MILESTONES[k].label}(${y}年)`).join(",") || "なし"} / 就労者数 ${S.agents.filter(a => a.works).length}/50`
         : "";
@@ -562,14 +570,38 @@ export default function NeoSimulator() {
 余白: ${m0 ? m0.余白 : "-"} → ${mN ? mN.余白 : "-"} / 幸福度: ${m0 ? m0.幸福度 : "-"} → ${mN ? mN.幸福度 : "-"}
 属性別平均幸福: ${demo}
 消耗が心配な住民: ${burnout || "なし"} / 定着文化: ${S.institutions.join(",") || "なし"}
-施行中の追加ルール: ${S.customRules.join(" / ") || "なし(基金配分・挑戦認定・所有権は未整備)"}`;
-      const sys = `あなたは応援資本主義シミュレーションの観測研究者。哲学:「豊かさはちょうど良い余白(最適≈12)。不足は窮屈、過剰は退屈」。「${ALL_SCENARIOS[S.scenario].label}」型社会(${ALL_SCENARIOS[S.scenario].desc})のデータから以下を分析: ①挑戦者は増えたか ②資本の偏りと循環(蓄財と応援循環のどちらが優勢か) ③人は何に時間を使っているか ④余白は適正か ⑤富はまだ尊敬を集めるか(富裕層vs挑戦者への応援シェアから判断) ⑥格差(男女・世代・貧富)は幸福差を生んでいるか。各見出し2文で数値を引用。良い面だけでなく問題や悪化も正直に指摘すること。最後に「この社会で目指される生き方」を総評2文で。装飾記号やマークダウン禁止。`;
+施行中の追加ルール: ${S.customRules.join(" / ") || "なし(基金配分・挑戦認定・所有権は未整備)"}${yearlyLine}`;
+      const sys = `あなたは応援資本主義シミュレーションの観測研究者。哲学:「豊かさはちょうど良い余白(最適≈12)。不足は窮屈、過剰は退屈」。「${ALL_SCENARIOS[S.scenario].label}」型社会(${ALL_SCENARIOS[S.scenario].desc})のデータから以下を分析: ①挑戦者は増えたか ②資本の偏りと循環(蓄財と応援循環のどちらが優勢か) ③人は何に時間を使っているか ④余白は適正か ⑤富はまだ尊敬を集めるか(富裕層vs挑戦者への応援シェアから判断) ⑥格差(男女・世代・貧富)は幸福差を生んでいるか ⑦年次推移データがあれば、悪化・回復の転換点となった年とその要因を推定。各見出し2文で数値を引用。良い面だけでなく問題や悪化も正直に指摘すること。最後に「この社会で目指される生き方」を総評2文で。装飾記号やマークダウン禁止。`;
       const ans = await callClaude(sys, data);
+      reportDataRef.current = data;
       setReport({ text: ans, t: fmtDate(S.now) });
+      setReportChat([]);
     } catch (e) {
       setReport({ text: `レポート生成に失敗: ${(e && e.message) || e}。サーバーのANTHROPIC_API_KEYが設定されているか確認してください。`, t: "" });
     }
     setReportLoading(false);
+  };
+
+  // ===== レポートについての議論チャット =====
+  const askReport = async () => {
+    if (!reportQ.trim() || !report?.t || reportChatLoading) return;
+    const q = reportQ;
+    setReportChat(rc => [...rc, { role: "you", text: q }]);
+    setReportQ(""); setReportChatLoading(true);
+    try {
+      const S = stateRef.current;
+      const sys = `あなたは応援資本主義シミュレーションの観測研究者。哲学:「豊かさはちょうど良い余白(最適≈12)。不足は窮屈、過剰は退屈」。「${ALL_SCENARIOS[S.scenario].label}」型社会のシミュレーションについて、以下の観測データとあなた自身が書いた分析レポートを踏まえてユーザーと議論する。データから具体的な数値を引いて簡潔(4文以内)に答える。データに無いことは推測と明示する。反論には誠実に向き合い、正しければ自説を修正する。装飾記号やマークダウン禁止。
+【観測データ】
+${reportDataRef.current}
+【あなたの分析レポート】
+${report.text}`;
+      const history = reportChat.slice(-8).map(m => `${m.role === "you" ? "ユーザー" : "研究者(あなた)"}: ${m.text}`).join("\n");
+      const ans = await callClaude(sys, `${history ? `これまでの議論:\n${history}\n\n` : ""}ユーザーの発言: ${q}`);
+      setReportChat(rc => [...rc, { role: "ai", text: ans }]);
+    } catch (e) {
+      setReportChat(rc => [...rc, { role: "ai", text: `(応答に失敗: ${(e && e.message) || e})` }]);
+    }
+    setReportChatLoading(false);
   };
 
   // ===== インタビュー =====
@@ -647,7 +679,7 @@ export default function NeoSimulator() {
     setEraName(s.eraName || null); setWorldNote(s.worldNote || ""); setFlags(s.flags || {});
     zoneHoursRef.current = s.zoneHours || { house: 0, culture: 0, sports: 0, robots: 0, food: 0, home: 0 };
     issuedRef.current = s.issued || 0;
-    setSelected(null); setInterview([]); setReport(null); setError(null);
+    setSelected(null); setInterview([]); setReport(null); setReportChat([]); setError(null);
     setRunId(id); setLoadOpen(false);
     setSaveMsg("📂 記録を読み込みました");
     setTimeout(() => setSaveMsg(null), 4000);
@@ -671,7 +703,7 @@ export default function NeoSimulator() {
   const reset = (scn = stateRef.current.scenario) => {
     setPlaying(false); setScenario(scn); setAgents(populationFor(scn)); setNow(startFor(scn));
     setEvents([]); setChallenges([]); setInstitutions([]); setMetrics([]); setCustomRules([]); setFlags({});
-    setSelected(null); setInterview([]); setEraName(null); setReport(null);
+    setSelected(null); setInterview([]); setEraName(null); setReport(null); setReportChat([]);
     zoneHoursRef.current = { house: 0, culture: 0, sports: 0, robots: 0, food: 0, home: 0 };
     issuedRef.current = 0;
     resetFbNoted();
@@ -904,6 +936,76 @@ export default function NeoSimulator() {
                     {report.text}
                   </div>
                 )}
+
+                {/* レポートについて研究者と議論する */}
+                {report?.t && (
+                  <div className="bg-slate-800/40 border border-white/5 rounded-lg p-2.5 space-y-2">
+                    <div className="text-[11px] font-bold text-slate-400">💬 レポートについて研究者と議論</div>
+                    {reportChat.length === 0 && <div className="text-[9px] text-slate-600">例:「なぜ挑戦者が増えないの?」「循環率が低い原因は?」「このデータから何を変えるべき?」</div>}
+                    <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                      {reportChat.map((m, i) => (
+                        <div key={i} className={`text-[11px] rounded-xl px-3 py-2 leading-relaxed whitespace-pre-wrap max-w-[92%] ${m.role === "you" ? "bg-cyan-800/60 ml-auto" : "bg-indigo-950/70 border border-indigo-800/40"}`}>
+                          {m.role === "ai" && <span className="text-[9px] text-indigo-300 block mb-0.5">🔬 観測研究者</span>}
+                          {m.text}
+                        </div>
+                      ))}
+                      {reportChatLoading && <div className="text-[11px] text-slate-500 animate-pulse">🔬 研究者が考えています…</div>}
+                    </div>
+                    <div className="flex gap-1.5">
+                      <input value={reportQ} onChange={e => setReportQ(e.target.value)} onKeyDown={e => e.key === "Enter" && askReport()}
+                        placeholder="レポートへの質問・反論…"
+                        className="flex-1 bg-slate-800 rounded-lg px-2.5 py-2 text-[11px] outline-none focus:ring-1 ring-indigo-500 min-w-0" />
+                      <button onClick={askReport} disabled={reportChatLoading}
+                        className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg px-3 text-[11px] font-bold shrink-0">送信</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 年次推移レポート */}
+                {(() => {
+                  const yr = metrics.filter(m => /^\d{4}年$/.test(m.label));
+                  if (!yr.length) return null;
+                  const msByYear = {};
+                  if (scenario === "transition") {
+                    Object.entries(flags).forEach(([k, y]) => { msByYear[`${y}年`] = (msByYear[`${y}年`] || "") + MILESTONES[k].icon; });
+                  }
+                  return (
+                    <div>
+                      <div className="text-[11px] font-bold text-slate-400 mb-1.5">📅 年次推移 <span className="text-slate-600 font-normal">(+1年ごとの記録)</span></div>
+                      <div className="overflow-x-auto rounded-lg border border-white/5">
+                        <table className="w-full text-[10px] font-mono">
+                          <thead>
+                            <tr className="bg-slate-800/80 text-slate-400">
+                              <th className="px-2 py-1.5 text-left font-bold">年</th>
+                              <th className="px-1" title="平均幸福度">😊</th>
+                              <th className="px-1" title="平均余白">🌿</th>
+                              <th className="px-1" title="挑戦者数">🚩</th>
+                              <th className="px-1" title="資本ジニ係数">ジニ</th>
+                              <th className="px-1" title="応援の循環率">循環%</th>
+                              <th className="px-1" title="平均メンタル">🧠</th>
+                              {scenario === "transition" && <th className="px-1" title="成立した制度転換">転換</th>}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {yr.map(m => (
+                              <tr key={m.label} className="odd:bg-slate-800/30 text-center text-slate-300">
+                                <td className="px-2 py-1 text-left text-slate-400">{m.label}</td>
+                                <td>{m.幸福度}</td>
+                                <td>{m.余白}</td>
+                                <td>{m.挑戦者数}</td>
+                                <td>{m.資本偏り}</td>
+                                <td>{m.循環率}</td>
+                                <td>{m.メンタル}</td>
+                                {scenario === "transition" && <td>{msByYear[m.label] || ""}</td>}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="text-[9px] text-slate-500 mt-1 px-1">この推移はAI観測レポートにも渡され、転換点の分析に使われます</div>
+                    </div>
+                  );
+                })()}
 
                 {/* 6資源の街平均 */}
                 <div>
