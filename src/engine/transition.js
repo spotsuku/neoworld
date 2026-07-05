@@ -73,8 +73,8 @@ export const TR_MONTH_SYSTEM = (flags, year) => `${trWorldRule(flags, year)}
 
 export const TR_YEAR_SYSTEM = (flags, year) => `${trWorldRule(flags, year)}
 これから1年分の社会の大変動を年代記として一括生成。時代の名前を付け、制度・文化・価値観レベルの変化、成功と影(失業・格差・移行の混乱・反対運動など)の両方を描く。
-制度転換(milestones)は、社会的圧力が十分に高まったと判断した年にのみ成立させること。焦らないこと(移行全体は2050年前後まで、およそ20年かける)。前提: 応援基金は応援制度の後、BI試験は自動化の波の後、充足BIはBI試験の後にのみ成立しうる。簡潔なJSONのみ出力(前置き禁止):
-{"eraName":"20XX年:○○の年(12字以内)","transformations":[{"icon":"絵文字","text":"時代の変化30字以内"}を4件],"arcs":[{"agentId":"id","text":"個人の1年30字以内"}を3件],"newInstitutions":["定着した制度・文化(15字以内)"]を0〜2件,"completedChallenges":["実現した挑戦名"],"milestones":["auto_wave|support_law|fund_law|bi_trial|bi_full"]を0〜2件(今年成立した制度転換のみ。未成立リストから選ぶ。時期尚早なら空配列),"risk":"顕在化した社会リスク25字以内","dMental":-15〜15,"supportFlow":年間応援流通量(0〜100000),"worldNote":"20字以内"}`;
+挑戦(newChallenges)は制度が無くても草の根で生まれる。人々が動き出した年は1〜3件生成すること(社会が完全に凍りついた年のみ0件)。制度転換(milestones)は、社会的圧力が十分に高まったと判断した年にのみ成立させること。焦らないこと(移行全体は2050年前後まで、およそ20年かける)。前提: 応援基金は応援制度の後、BI試験は自動化の波の後、充足BIはBI試験の後にのみ成立しうる。簡潔なJSONのみ出力(前置き禁止):
+{"eraName":"20XX年:○○の年(12字以内)","transformations":[{"icon":"絵文字","text":"時代の変化30字以内"}を4件],"arcs":[{"agentId":"id","text":"個人の1年30字以内"}を3件],"newChallenges":[{"name":"挑戦名(12字以内)","ownerId":"住民id"}]を0〜3件,"newInstitutions":["定着した制度・文化(15字以内)"]を0〜2件,"completedChallenges":["実現した挑戦名"],"milestones":["auto_wave|support_law|fund_law|bi_trial|bi_full"]を0〜2件(今年成立した制度転換のみ。未成立リストから選ぶ。時期尚早なら空配列),"risk":"顕在化した社会リスク25字以内","dMental":-15〜15,"supportFlow":年間応援流通量(0〜100000),"worldNote":"20字以内"}`;
 
 // ---- 経済メカニクス ----
 // フェーズごとの収入構成: 賃金 → +ロボット配当 → +部分BI → 充足BI(賃金消滅)

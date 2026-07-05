@@ -7,7 +7,7 @@ import {
   ZONES, ZONE_KEYS, RES_DEF, NEED_LINE, CAP_FLOOR, FUND_MONTHLY, OPT_SLACK,
   clamp, normCap, derive, slackState, gini, generatePopulation, weakest,
 } from "./engine/population.js";
-import { fbHour, fbDay, fbMonth, fbYear, fbNoted, markFbNoted, resetFbNoted } from "./engine/fallback.js";
+import { fbHour, fbDay, fbMonth, fbYear, fbNewChallenges, fbNoted, markFbNoted, resetFbNoted } from "./engine/fallback.js";
 import { SCENARIOS, HOUR_SYSTEM, DAY_SYSTEM, MONTH_SYSTEM, YEAR_SYSTEM, rosterText } from "./engine/prompts.js";
 import {
   TRANSITION, MILESTONES, TR_HOUR_SYSTEM, TR_DAY_SYSTEM, TR_MONTH_SYSTEM, TR_YEAR_SYSTEM,
@@ -444,7 +444,11 @@ export default function NeoSimulator() {
     try { result = parseJSON(await callClaude(yearSys, `${S.now.getFullYear()}年の1年分を生成。\n${rosterText(S.agents, S.challenges)}\n【定着済みの文化】${S.institutions.join(",")||"なし"}\n【平均幸福度】${Math.round(S.agents.reduce((s,a)=>s+a.happiness,0)/S.agents.length)} 【平均余白】${(S.agents.reduce((s,a)=>s+a.slack,0)/S.agents.length).toFixed(1)}${yearExtra}\n【施行中の追加ルール】${S.customRules.join(" / ") || "なし"}`)); }
     catch (fe) {
       result = fbYear(S.scenario === "transition" ? { ...S, scenario: trFallbackScenario(S.flags) } : S);
-      if (S.scenario === "transition") result.milestones = fbTrMilestones(S.flags, next.getFullYear());
+      if (S.scenario === "transition") {
+        result.milestones = fbTrMilestones(S.flags, next.getFullYear());
+        // 移行期は+1年が基本操作なので、簡易エンジンでも草の根の挑戦が生まれる
+        result.newChallenges = fbNewChallenges(S, S.flags.support_law ? 0.9 : 0.55);
+      }
       fbMsg = fe && fe.message;
     }
     const evs = [{ t, icon: "🌏", text: `【1年経過】${result.eraName}`, type: "epoch" }];
@@ -473,8 +477,23 @@ export default function NeoSimulator() {
       evs.push({ t, icon: a?.emoji || "👤", text: `${a ? a.name + ": " : ""}${x.text}`, type: "action" });
     });
     if (result.risk) evs.push({ t, icon: "⚠️", text: `社会リスク: ${result.risk}`, type: "risk" });
-    let newCh = applyChallenges(S.challenges, { done: result.completedChallenges }, S.agents, evs, t);
-    newCh = newCh.map(c => c.status === "active" ? { ...c, progress: 3, status: "done" } : c);
+    let newCh;
+    if (S.scenario === "transition") {
+      // 移行期: +1年が基本操作なので挑戦もここで生まれ、複数年かけて進行・実現する
+      newCh = applyChallenges(S.challenges, { create: result.newChallenges, done: result.completedChallenges }, S.agents, evs, t);
+      newCh = newCh.map(c => {
+        if (c.status !== "active") return c;
+        if (c.progress >= 3) {
+          evs.push({ t, icon: "🎉", text: `挑戦「${c.name}」が実現!街の文化になった`, type: "challenge" });
+          return { ...c, status: "done" };
+        }
+        const boost = nf.support_law ? 120 + Math.floor(Math.random() * 240) : 20 + Math.floor(Math.random() * 40);
+        return { ...c, progress: Math.min(3, c.progress + 2), totalSupport: c.totalSupport + boost };
+      });
+    } else {
+      newCh = applyChallenges(S.challenges, { done: result.completedChallenges }, S.agents, evs, t);
+      newCh = newCh.map(c => c.status === "active" ? { ...c, progress: 3, status: "done" } : c);
+    }
     const newInst = [...S.institutions, ...(result.newInstitutions || [])];
     (result.newInstitutions || []).forEach(n => evs.push({ t, icon: "🏛", text: `「${n}」が制度・文化として定着`, type: "institution" }));
     let fundGains = {};
@@ -497,8 +516,14 @@ export default function NeoSimulator() {
         : (base.dailyIncome || 0) * 365;
       issuedRef.current += inc;
       const arc = (result.arcs || []).find(x => x.agentId === a.id && x.text);
+      const res = stepResourcesJump(base, 365, result.dMental || 0, newCh);
+      if (S.scenario === "transition") {
+        // 定着した文化(対話の場・互助)が「つながり」の底を支える — 24年運転での孤立崩壊を防ぐ
+        const connFloor = 22 + Math.min(10, newInst.length) * 3;
+        res.conn = Math.max(res.conn, clamp(connFloor + noise(4)));
+      }
       return finalize({ ...base, age: base.age + 1, speech: null, support: base.support + inc + (fundGains[a.id] || 0), recv: (base.recv || 0) + (dist[a.id] || 0) + (fundGains[a.id] || 0),
-        res: stepResourcesJump(base, 365, result.dMental || 0, newCh),
+        res,
         memories: [...base.memories.slice(-6), `${t}:${arc ? arc.text : "1年が過ぎ、少し歳を重ねた"}`] });
     });
     if (jobsLost > 0) evs.push({ t, icon: "🤖", text: `自動化により今年${jobsLost}人が職を失った`, type: "risk" });

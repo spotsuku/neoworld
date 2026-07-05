@@ -14,7 +14,7 @@ export const resetFbNoted = () => { noted = false; };
 const fbPick = arr => arr && arr.length ? arr[Math.floor(Math.random() * arr.length)] : null;
 const fbFlowScale = scn => scn === "post" ? 1 : scn === "current" ? 0.45 : 0.12;
 const fbChName = a => `${fbPick(PASSIONS[a.arch] || ["企画"])}の${fbPick(["会", "祭", "教室", "計画", "工房"])}`;
-function fbNewChallenges(S, p) {
+export function fbNewChallenges(S, p) {
   const cands = S.agents.filter(a => !S.challenges.some(c => c.owner === a.id && c.status === "active"));
   if (!cands.length || Math.random() > p) return [];
   const a = fbPick(cands);
