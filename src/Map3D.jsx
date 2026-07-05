@@ -175,38 +175,48 @@ export default function Map3D({ agents, selected, isNight, onSelect }) {
         plaza.position.set(cx, 0.03, cz);
         scene.add(plaza);
       } else if (key === "sports") {
-        // スポーツ: 陸上トラック+フィールド+観客スタンド+大型ビジョン
-        const field = new THREE.Mesh(new THREE.CircleGeometry(r * 0.5, 40), new THREE.MeshLambertMaterial({ color: 0x74c94e }));
+        // スタジアム: ドーム球場(ベイサイド風の銀色ドーム)+陸上トラック+大型ビジョン
+        const field = new THREE.Mesh(new THREE.CircleGeometry(r * 0.42, 40), new THREE.MeshLambertMaterial({ color: 0x74c94e }));
         field.rotation.x = -Math.PI / 2;
-        field.position.set(cx, 0.53, cz);
-        const track = new THREE.Mesh(new THREE.RingGeometry(r * 0.5, r * 0.82, 48), new THREE.MeshLambertMaterial({ color: 0x2f6fd8 }));
+        field.position.set(cx, 0.53, cz + r * 0.28);
+        const track = new THREE.Mesh(new THREE.RingGeometry(r * 0.42, r * 0.66, 48), new THREE.MeshLambertMaterial({ color: 0x2f6fd8 }));
         track.rotation.x = -Math.PI / 2;
-        track.position.set(cx, 0.53, cz);
-        const stand = new THREE.Mesh(new THREE.TorusGeometry(r * 0.92, 1.1, 8, 28, Math.PI * 0.75), new THREE.MeshLambertMaterial({ color: 0xf1f5f9 }));
-        stand.rotation.x = Math.PI / 2;
-        stand.rotation.z = Math.PI * 1.05;
-        stand.position.set(cx, 1.2, cz);
-        const screen = new THREE.Mesh(new THREE.BoxGeometry(5.4, 3, 0.4),
-          new THREE.MeshLambertMaterial({ color: 0x0f172a, emissive: 0x3b82f6, emissiveIntensity: 0.5 }));
-        screen.position.set(cx, 3.4, cz - r * 0.72);
-        scene.add(field, track, stand, screen);
-      } else if (key === "culture") {
-        // 文化: 野外ステージ(シェル)+カラフルなアートウォール
-        const stage = new THREE.Mesh(new THREE.CylinderGeometry(3.6, 3.9, 1.1, 32), new THREE.MeshLambertMaterial({ color: 0xf8fafc }));
-        stage.position.set(cx, 1.05, cz - r * 0.28);
-        const shell = new THREE.Mesh(
-          new THREE.CylinderGeometry(4.3, 4.3, 4.6, 28, 1, true, Math.PI * 0.9, Math.PI * 1.2),
-          new THREE.MeshLambertMaterial({ color: col, side: THREE.DoubleSide })
+        track.position.set(cx, 0.53, cz + r * 0.28);
+        const domeWall = new THREE.Mesh(new THREE.CylinderGeometry(4.8, 5.3, 2.6, 32), new THREE.MeshLambertMaterial({ color: 0xe8edf2 }));
+        domeWall.position.set(cx, 1.85, cz - r * 0.45);
+        const domeCap = new THREE.Mesh(
+          new THREE.SphereGeometry(4.8, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2),
+          new THREE.MeshPhongMaterial({ color: 0xc9d4dd, shininess: 70 })
         );
-        shell.position.set(cx, 2.9, cz - r * 0.28);
-        scene.add(stage, shell);
-        [[0xf472b6, -1], [0x22d3ee, 1]].forEach(([c, s]) => {
-          const wall = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.6, 0.35),
-            new THREE.MeshLambertMaterial({ color: c, emissive: c, emissiveIntensity: 0.25 }));
-          wall.position.set(cx + s * r * 0.55, 1.85, cz + r * 0.38);
-          wall.rotation.y = s * 0.5;
-          scene.add(wall);
+        domeCap.position.set(cx, 3.15, cz - r * 0.45);
+        const screen = new THREE.Mesh(new THREE.BoxGeometry(5.0, 2.8, 0.4),
+          new THREE.MeshLambertMaterial({ color: 0x0f172a, emissive: 0x3b82f6, emissiveIntensity: 0.5 }));
+        screen.position.set(cx + r * 0.62, 3.2, cz + r * 0.1);
+        screen.rotation.y = -0.5;
+        scene.add(field, track, domeWall, domeCap, screen);
+      } else if (key === "culture") {
+        // 文化: オーケストラハウス+マンガミュージアム+野外ステージ
+        const hall = new THREE.Mesh(new THREE.BoxGeometry(6.2, 3.4, 4.4), new THREE.MeshLambertMaterial({ color: 0xf5edda }));
+        hall.position.set(cx - r * 0.42, 2.2, cz - r * 0.22);
+        const hallRoof = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 6.2, 24), new THREE.MeshLambertMaterial({ color: 0xd4a94f }));
+        hallRoof.rotation.z = Math.PI / 2;
+        hallRoof.position.set(cx - r * 0.42, 3.9, cz - r * 0.22);
+        const hallDoor = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.8, 0.12),
+          new THREE.MeshLambertMaterial({ color: 0xffe9b8, emissive: 0xffc46b, emissiveIntensity: 0.5 }));
+        hallDoor.position.set(cx - r * 0.42, 1.4, cz - r * 0.22 + 2.25);
+        scene.add(hall, hallRoof, hallDoor);
+        const museum = new THREE.Mesh(new THREE.BoxGeometry(4.8, 3.2, 3.8), new THREE.MeshLambertMaterial({ color: 0xfefefe }));
+        museum.position.set(cx + r * 0.46, 2.1, cz - r * 0.18);
+        scene.add(museum);
+        [[0xf472b6, -1.3], [0x38bdf8, 0], [0xfbbf24, 1.3]].forEach(([c, dx]) => {
+          const panel = new THREE.Mesh(new THREE.BoxGeometry(1.1, 2.2, 0.15),
+            new THREE.MeshLambertMaterial({ color: c, emissive: c, emissiveIntensity: 0.3 }));
+          panel.position.set(cx + r * 0.46 + dx, 2.1, cz - r * 0.18 + 1.98);
+          scene.add(panel);
         });
+        const stage = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.9, 0.9, 28), new THREE.MeshLambertMaterial({ color: 0xf8fafc }));
+        stage.position.set(cx, 0.95, cz + r * 0.42);
+        scene.add(stage);
       } else if (key === "robots") {
         // 農場: 植栽レーン+温室+農場ロボット(労働はAI・ロボットが担う)
         for (let i = 0; i < 4; i++) {
@@ -240,11 +250,24 @@ export default function Map3D({ agents, selected, isNight, onSelect }) {
           parasol.position.set(x, 3.3, z2);
           scene.add(leg, table, parasol);
         });
-        const counter = new THREE.Mesh(new THREE.BoxGeometry(5.6, 2.2, 2.3), new THREE.MeshLambertMaterial({ color: 0xb4795a }));
-        counter.position.set(cx, 1.6, cz - r * 0.55);
-        const awning = new THREE.Mesh(new THREE.BoxGeometry(6.0, 0.3, 3.1), new THREE.MeshLambertMaterial({ color: 0xf59e42 }));
-        awning.position.set(cx, 3.0, cz - r * 0.55);
-        scene.add(counter, awning);
+        // 屋台通り(赤提灯が灯る屋台が並ぶ)
+        for (let i = 0; i < 3; i++) {
+          const x = cx - 4.2 + i * 4.2, z2 = cz - r * 0.55;
+          const stall = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.7, 1.7), new THREE.MeshLambertMaterial({ color: 0xc98a5a }));
+          stall.position.set(x, 1.35, z2);
+          const sRoof = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.28, 2.3), new THREE.MeshLambertMaterial({ color: 0xa33f3f }));
+          sRoof.position.set(x, 2.45, z2);
+          const noren = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.6, 0.08), new THREE.MeshLambertMaterial({ color: 0xe25555 }));
+          noren.position.set(x, 1.95, z2 + 0.92);
+          scene.add(stall, sRoof, noren);
+          for (let j = 0; j < 3; j++) {
+            const lantern = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8),
+              new THREE.MeshLambertMaterial({ color: 0xff5544, emissive: 0xff3311, emissiveIntensity: 0.7 }));
+            lantern.scale.y = 1.25;
+            lantern.position.set(x - 0.9 + j * 0.9, 2.15, z2 + 1.08);
+            scene.add(lantern);
+          }
+        }
       } else if (key === "home") {
         // 住居: パステルカラーの住宅クラスタ
         const pastel = [0xf3e8d8, 0xe8eef5, 0xf5e8ee, 0xe9f5e8, 0xf5f2e0];
@@ -276,6 +299,7 @@ export default function Map3D({ agents, selected, isNight, onSelect }) {
     const zonesArr = Object.values(ZONES);
     for (let i = 0; i < 46; i++) {
       const x = (rng() - 0.5) * 190, zpos = (rng() - 0.5) * 190;
+      if (zpos < -66) continue; // 海(博多湾)エリアには生やさない
       if (zonesArr.some(z => Math.hypot(x - W(z.x), zpos - W(z.y)) < z.r * 1.35 + 4)) continue;
       const s = 0.8 + rng() * 0.9;
       const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.35 * s, 0.45 * s, 2.2 * s, 8), trunkMat);
@@ -292,11 +316,86 @@ export default function Map3D({ agents, selected, isNight, onSelect }) {
       const ang = (i / 14) * Math.PI * 2 + rng() * 0.3;
       const dist = 120 + rng() * 60;
       const h = 14 + rng() * 34;
+      const bx = Math.cos(ang) * dist, bz = Math.sin(ang) * dist;
+      if (bz < -66) continue; // 北側は博多湾(海)なのでビルを建てない
       const b = new THREE.Mesh(new THREE.BoxGeometry(7 + rng() * 8, h, 7 + rng() * 8), buildingMat);
-      b.position.set(Math.cos(ang) * dist, h / 2, Math.sin(ang) * dist);
+      b.position.set(bx, h / 2, bz);
       scene.add(b);
       buildings.push(b);
     }
+
+    // ===== 博多湾エリア(福岡モチーフ) =====
+    // 海と砂浜
+    const sea = new THREE.Mesh(new THREE.PlaneGeometry(520, 190),
+      new THREE.MeshPhongMaterial({ color: 0x3aa7d9, shininess: 90, transparent: true, opacity: 0.92 }));
+    sea.rotation.x = -Math.PI / 2;
+    sea.position.set(0, 0.08, -168);
+    const beach = new THREE.Mesh(new THREE.PlaneGeometry(520, 12),
+      new THREE.MeshLambertMaterial({ color: 0xeeddb0 }));
+    beach.rotation.x = -Math.PI / 2;
+    beach.position.set(0, 0.06, -68);
+    scene.add(sea, beach);
+
+    // 福岡タワー(海辺にそびえる三角ガラスタワー)
+    const fTower = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 2.9, 34, 3),
+      new THREE.MeshPhongMaterial({ color: 0x9fd0ee, transparent: true, opacity: 0.8, shininess: 120, emissive: 0x2b6f9e, emissiveIntensity: 0.18 }));
+    fTower.position.set(34, 17, -60);
+    const fAntenna = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 7, 6), new THREE.MeshLambertMaterial({ color: 0xdbe6ee }));
+    fAntenna.position.set(34, 37.5, -60);
+    scene.add(fTower, fAntenna);
+
+    // ベイサイドの観覧車(回転する)
+    const wheelBase = new THREE.Group();
+    wheelBase.position.set(-46, 0, -58);
+    [[-2.4, 0.22], [2.4, -0.22]].forEach(([dx, tilt]) => {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.42, 11, 8), new THREE.MeshLambertMaterial({ color: 0x94a3b8 }));
+      leg.position.set(dx, 5.2, 0);
+      leg.rotation.z = tilt;
+      wheelBase.add(leg);
+    });
+    const wheel = new THREE.Group();
+    wheel.position.y = 10.5;
+    wheel.add(new THREE.Mesh(new THREE.TorusGeometry(8, 0.3, 10, 44), new THREE.MeshLambertMaterial({ color: 0xf8fafc })));
+    const gondolaCols = [0xf87171, 0xfbbf24, 0x4ade80, 0x38bdf8, 0xa78bfa, 0xf472b6, 0xfb923c, 0x2dd4bf];
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const spoke = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 8, 6), new THREE.MeshLambertMaterial({ color: 0xcbd5e1 }));
+      spoke.rotation.z = a;
+      spoke.position.set(-Math.sin(a) * 4, Math.cos(a) * 4, 0);
+      const gondola = new THREE.Mesh(new THREE.SphereGeometry(0.75, 12, 10), new THREE.MeshLambertMaterial({ color: gondolaCols[i] }));
+      gondola.position.set(Math.cos(a) * 8, Math.sin(a) * 8, 0.7);
+      wheel.add(spoke, gondola);
+    }
+    wheelBase.add(wheel);
+    scene.add(wheelBase);
+
+    // 帆船(湾をゆっくり行き交う)
+    const boats = [];
+    for (let i = 0; i < 3; i++) {
+      const boat = new THREE.Group();
+      const hull = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.8, 1.3), new THREE.MeshLambertMaterial({ color: 0xffffff }));
+      hull.position.y = 0.5;
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 3.4, 6), new THREE.MeshLambertMaterial({ color: 0x8a7a66 }));
+      mast.position.y = 2.4;
+      const sail = new THREE.Mesh(new THREE.ConeGeometry(1.3, 2.6, 4), new THREE.MeshLambertMaterial({ color: [0xffffff, 0xffd166, 0x93c5fd][i] }));
+      sail.scale.z = 0.18;
+      sail.position.y = 2.7;
+      boat.add(hull, mast, sail);
+      scene.add(boat);
+      boats.push({ g: boat, x0: -80 + i * 70, z: -88 - i * 24, speed: 1.4 + i * 0.7, phase: i * 2 });
+    }
+
+    // 気球(街の上空をふわふわ漂う)
+    const balloons = [];
+    [[0xff6b81, 46, 30], [0xffd166, 62, 37]].forEach(([c, rr, hh], i) => {
+      const g = new THREE.Group();
+      const envMesh = new THREE.Mesh(new THREE.SphereGeometry(2.3, 14, 12), new THREE.MeshLambertMaterial({ color: c }));
+      const basket = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.7, 0.9), new THREE.MeshLambertMaterial({ color: 0x8a6a4a }));
+      basket.position.y = -3.1;
+      g.add(envMesh, basket);
+      scene.add(g);
+      balloons.push({ g, r: rr, h: hh, speed: 0.05 + i * 0.02, phase: i * 2.6 });
+    });
 
     // 空を飛び交うドローン(コンセプトアートの空)
     const drones = [];
@@ -318,6 +417,7 @@ export default function Map3D({ agents, selected, isNight, onSelect }) {
     const flowerCols = [0xffd7e8, 0xfff3b8, 0xffffff, 0xd8ecff];
     for (let i = 0; i < 26; i++) {
       const x = (rng() - 0.5) * 170, zp = (rng() - 0.5) * 170;
+      if (zp < -66) continue; // 海エリアには咲かせない
       if (zonesArr.some(z => Math.hypot(x - W(z.x), zp - W(z.y)) < z.r * 1.35 + 3)) continue;
       const patch = new THREE.Mesh(new THREE.CircleGeometry(1.1 + rng() * 1.6, 10),
         new THREE.MeshLambertMaterial({ color: flowerCols[Math.floor(rng() * 4)], transparent: true, opacity: 0.7 }));
@@ -394,6 +494,16 @@ export default function Map3D({ agents, selected, isNight, onSelect }) {
         const a = t0 * d.speed + d.phase;
         d.g.position.set(Math.cos(a) * d.r, d.h + Math.sin(t0 * 1.7 + d.phase) * 0.8, Math.sin(a) * d.r);
         d.g.rotation.y = -a;
+      });
+      wheel.rotation.z = t0 * 0.18; // 観覧車
+      boats.forEach(bt => {
+        const x = ((((bt.x0 + t0 * bt.speed) % 240) + 240) % 240) - 120;
+        bt.g.position.set(x, 0.12 + Math.sin(t0 * 1.3 + bt.phase) * 0.12, bt.z);
+        bt.g.rotation.z = Math.sin(t0 * 1.1 + bt.phase) * 0.04;
+      });
+      balloons.forEach(bl => {
+        const a = t0 * bl.speed + bl.phase;
+        bl.g.position.set(Math.cos(a) * bl.r, bl.h + Math.sin(t0 * 0.6 + bl.phase) * 1.2, Math.sin(a) * bl.r * 0.55 - 14);
       });
 
       for (const rec of agentMeshes.values()) {
